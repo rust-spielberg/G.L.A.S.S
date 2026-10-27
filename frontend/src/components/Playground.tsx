@@ -10,11 +10,14 @@ import {
   FileCode, 
   CheckCircle2, 
   Code2,
-  RotateCcw
+  RotateCcw,
+  Paperclip,
+  X,
+  FileText
 } from 'lucide-react';
 
 // -----------------------------------------------------------------------------
-// 3D FIBONACCI PARTICLE SYNTHESIS ORB (60 FPS CANVAS ENGINE)
+// 3D FIBONACCI PARTICLE SYNTHESIS ORB
 // -----------------------------------------------------------------------------
 function HeroOrb() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -94,7 +97,7 @@ function HeroOrb() {
   }, []);
 
   return (
-    <div className="relative flex items-center justify-center my-2 pointer-events-none">
+    <div className="relative flex items-center justify-center my-2 pointer-events-none shrink-0">
       <div className="absolute w-96 h-96 rounded-full bg-purple-500/40 blur-[130px] scale-110 opacity-90 pointer-events-none" />
       <canvas ref={canvasRef} className="relative z-10 w-[420px] h-[420px]" />
     </div>
@@ -104,7 +107,7 @@ function HeroOrb() {
 // -----------------------------------------------------------------------------
 // WORKSPACE ACTIONS (Export .zip + Git Push Modal)
 // -----------------------------------------------------------------------------
-function WorkspaceActions({ sessionId = "default_session" }: { sessionId?: string }) {
+function WorkspaceActions({ sessionId }: { sessionId: string }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [repoName, setRepoName] = useState("");
   const [githubToken, setGithubToken] = useState("");
@@ -239,10 +242,101 @@ function WorkspaceActions({ sessionId = "default_session" }: { sessionId?: strin
 }
 
 // -----------------------------------------------------------------------------
+// REUSABLE PROMPT BAR COMPONENT
+// -----------------------------------------------------------------------------
+interface PromptBarProps {
+  prompt: string;
+  setPrompt: (val: string) => void;
+  attachedFile: File | null;
+  removeAttachedFile: () => void;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  handleRun: (e?: React.FormEvent) => void;
+  loading: boolean;
+  placeholderText: string;
+}
+
+function PromptBar({
+  prompt,
+  setPrompt,
+  attachedFile,
+  removeAttachedFile,
+  fileInputRef,
+  handleFileChange,
+  handleRun,
+  loading,
+  placeholderText
+}: PromptBarProps) {
+  return (
+    <form onSubmit={handleRun} className="w-full relative group shrink-0">
+      <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl blur opacity-35 group-hover:opacity-75 transition duration-500" />
+      <div className="relative bg-zinc-950/90 border border-white/10 rounded-2xl p-3 flex flex-col gap-2 shadow-2xl">
+        
+        {/* ATTACHED FILE CHIP */}
+        {attachedFile && (
+          <div className="flex items-center space-x-2 px-2.5 py-1 rounded-lg bg-purple-950/50 border border-purple-500/30 text-purple-300 text-xs w-fit">
+            <FileText className="w-3.5 h-3.5 text-purple-400" />
+            <span>{attachedFile.name}</span>
+            <button
+              type="button"
+              onClick={removeAttachedFile}
+              className="hover:text-white text-zinc-400 ml-1"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        <div className="flex items-center">
+          <Sparkles className="w-5 h-5 text-purple-400 ml-2 mr-3 shrink-0" />
+          
+          <input
+            type="text"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder={placeholderText}
+            className="w-full bg-transparent text-sm text-white placeholder-zinc-500 focus:outline-none font-mono"
+          />
+
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            className="hidden"
+            accept=".py,.c,.cpp,.java,.js,.ts,.html,.css,.rs,.go,.json,.md"
+          />
+
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            title="Attach local code file to audit & refine"
+            className="p-2 text-zinc-400 hover:text-purple-300 transition-colors shrink-0"
+          >
+            <Paperclip className="w-4 h-4" />
+          </button>
+
+          <button
+            type="submit"
+            disabled={loading || (!prompt.trim() && !attachedFile)}
+            className="p-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition-all disabled:opacity-50 shrink-0 ml-1"
+          >
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+// -----------------------------------------------------------------------------
 // MAIN PLAYGROUND COMPONENT
 // -----------------------------------------------------------------------------
 export function Playground() {
+  // DYNAMIC SESSION ID: Isolates each workspace session cleanly
+  const [sessionId, setSessionId] = useState<string>(() => `session_${Date.now()}`);
+
   const [prompt, setPrompt] = useState("");
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [tokens, setTokens] = useState(0);
   const [steps, setSteps] = useState<any[]>([]);
@@ -250,30 +344,61 @@ export function Playground() {
   const [activeFile, setActiveFile] = useState<string>("");
   const [fileContent, setFileContent] = useState<string>("");
 
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setAttachedFile(e.target.files[0]);
+    }
+  };
+
+  const removeAttachedFile = () => {
+    setAttachedFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const handleRun = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!prompt.trim() || loading) return;
+    if (!prompt.trim() && !attachedFile) return;
 
-    // Dissolve prompt bar -> Show Hero Orb + Execution Log immediately!
+    const currentPrompt = prompt;
+    setPrompt(""); // Clear input bar for next prompt
+
     setLoading(true);
-    setSteps([
-      {
-        type: "tool_step",
-        iteration: 1,
-        tool: "synthesize_codebase",
-        args: { prompt: prompt, status: "Querying G.L.A.S.S. model engine..." },
-        output: "Synthesizing multi-file codebase in isolated workspace..."
-      }
-    ]);
-    setFiles([]);
-    setActiveFile("");
-    setFileContent("");
+    
+    const initialTool = attachedFile ? "analyze_codebase" : (steps.length > 0 ? "update_codebase" : "synthesize_codebase");
+    const initialStatus = attachedFile 
+      ? `Analyzing attached file '${attachedFile.name}' for bugs & optimizations...` 
+      : "Querying G.L.A.S.S. model engine...";
+
+    const currentIteration = steps.length + 1;
+    const newStep = {
+      type: "tool_step",
+      iteration: currentIteration,
+      tool: initialTool,
+      args: { 
+        prompt: currentPrompt || `Refine and audit ${attachedFile?.name}`, 
+        file: attachedFile?.name || null,
+        status: initialStatus 
+      },
+      output: attachedFile 
+        ? `Inspecting ${attachedFile.name} in isolated execution workspace...` 
+        : "Synthesizing multi-file codebase in isolated workspace..."
+    };
+
+    setSteps(prev => [...prev, newStep]);
 
     try {
+      const formData = new FormData();
+      formData.append("prompt", currentPrompt);
+      formData.append("session_id", sessionId);
+      if (attachedFile) {
+        formData.append("file", attachedFile);
+      }
+
       const res = await fetch("http://localhost:8000/api/agent/run", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, session_id: "default_session" })
+        body: formData
       });
 
       const data = await res.json();
@@ -282,22 +407,31 @@ export function Playground() {
         throw new Error(data.detail || "Backend server returned an error.");
       }
 
-      setTokens(data.tokens?.total || 0);
-      setSteps(data.steps || []);
+      setTokens(prev => prev + (data.tokens?.total || 0));
+      if (data.steps) {
+        setSteps(data.steps);
+      }
 
       const createdFiles: string[] = [];
       data.steps?.forEach((step: any) => {
-        if (step.tool === "create_or_update_file" && step.args?.path) {
-          createdFiles.push(step.args.path);
+        if ((step.tool === "create_or_update_file" || step.tool === "refine_codebase") && step.args?.path) {
+          if (!createdFiles.includes(step.args.path)) {
+            createdFiles.push(step.args.path);
+          }
         }
       });
 
       if (createdFiles.length > 0) {
         setFiles(createdFiles);
-        selectFile(createdFiles[0]);
+        if (!activeFile || !createdFiles.includes(activeFile)) {
+          selectFile(createdFiles[0]);
+        } else {
+          selectFile(activeFile);
+        }
       }
     } catch (err: any) {
-      setSteps([
+      setSteps(prev => [
+        ...prev,
         {
           type: "completion",
           content: `Synthesis Error\n${err.message || "Backend server unreachable. Ensure Uvicorn is running on port 8000."}`
@@ -305,22 +439,29 @@ export function Playground() {
       ]);
     } finally {
       setLoading(false);
+      setAttachedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
   const handleReset = () => {
+    // Generate a new session ID for the new synthesis
+    setSessionId(`session_${Date.now()}`);
     setPrompt("");
+    setAttachedFile(null);
     setLoading(false);
     setSteps([]);
     setFiles([]);
     setActiveFile("");
     setFileContent("");
+    setTokens(0);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const selectFile = async (filename: string) => {
     setActiveFile(filename);
     try {
-      const res = await fetch(`http://localhost:8000/api/workspace/file/${filename}?session_id=default_session`);
+      const res = await fetch(`http://localhost:8000/api/workspace/file/${filename}?session_id=${sessionId}`);
       const data = await res.json();
       setFileContent(data.content || "");
     } catch {
@@ -328,13 +469,19 @@ export function Playground() {
     }
   };
 
+  const placeholderText = attachedFile
+    ? `Refine, audit, or edit ${attachedFile.name}...`
+    : files.length > 0
+    ? "Ask G.L.A.S.S. to modify, add features, or refine this codebase..."
+    : "Describe what software, API endpoint, or script you want G.L.A.S.S. to build...";
+
   return (
     <div className="min-h-screen bg-[#06050a] text-white font-mono flex flex-col relative overflow-hidden">
       {/* PURPLE RADIAL AMBIENT BACKGROUND GLOW */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-purple-900/20 blur-[140px] rounded-full pointer-events-none" />
 
       {/* TOP NAVBAR */}
-      <header className="h-14 border-b border-white/10 px-6 flex items-center justify-between z-10 bg-black/40 backdrop-blur-md">
+      <header className="h-14 border-b border-white/10 px-6 flex items-center justify-between z-10 bg-black/40 backdrop-blur-md shrink-0">
         <div className="flex items-center space-x-3">
           <span className="font-bold tracking-wider text-white text-base">G.L.A.S.S.</span>
           <span className="text-zinc-600">|</span>
@@ -361,47 +508,40 @@ export function Playground() {
       </header>
 
       {/* MAIN WORKSPACE VIEW */}
-      <main className="flex-1 flex overflow-hidden z-10 p-6 gap-6">
+      <main className="flex-1 flex overflow-hidden z-10 p-6 gap-6 min-h-0">
         {/* LEFT COLUMN */}
-        <div className={`flex flex-col transition-all duration-500 ${files.length > 0 ? 'w-1/2 gap-4' : 'w-full max-w-4xl mx-auto justify-center items-center gap-4'}`}>
+        <div className={`flex flex-col transition-all duration-500 min-h-0 ${files.length > 0 ? 'w-1/2 gap-4' : 'w-full max-w-4xl mx-auto justify-center items-center gap-4'}`}>
           
-          {/* 1. IDLE STATE: SHOW PROMPT BAR IN CENTER */}
+          {/* 1. IDLE STATE: CENTERED PROMPT PILL (Before first run) */}
           {!loading && steps.length === 0 && (
-            <form onSubmit={handleRun} className="w-full max-w-2xl relative group">
-              <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl blur opacity-35 group-hover:opacity-75 transition duration-500" />
-              <div className="relative bg-zinc-950/90 border border-white/10 rounded-2xl p-3 flex items-center shadow-2xl">
-                <Sparkles className="w-5 h-5 text-purple-400 ml-2 mr-3 shrink-0" />
-                <input
-                  type="text"
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="Describe what software, API endpoint, or script you want G.L.A.S.S. to build..."
-                  className="w-full bg-transparent text-sm text-white placeholder-zinc-500 focus:outline-none"
-                />
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="p-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition-all disabled:opacity-50 shrink-0 ml-2"
-                >
-                  <ArrowUp className="w-4 h-4" />
-                </button>
-              </div>
-            </form>
+            <div className="w-full max-w-2xl">
+              <PromptBar
+                prompt={prompt}
+                setPrompt={setPrompt}
+                attachedFile={attachedFile}
+                removeAttachedFile={removeAttachedFile}
+                fileInputRef={fileInputRef}
+                handleFileChange={handleFileChange}
+                handleRun={handleRun}
+                loading={loading}
+                placeholderText={placeholderText}
+              />
+            </div>
           )}
 
-          {/* 2. SYNTHESIZING STATE: PROMPT BAR DISSOLVES -> SHOW HERO ORB */}
+          {/* 2. SYNTHESIZING STATE: SHOW HERO ORB */}
           {loading && <HeroOrb />}
 
-          {/* 3. ACTIVE EXECUTION LOG PANEL */}
+          {/* 3. EXECUTION LOG PANEL */}
           {steps.length > 0 && (
-            <div className="w-full flex-1 bg-zinc-950/70 border border-white/10 rounded-2xl p-4 flex flex-col gap-4 overflow-y-auto shadow-2xl">
-              <div className="text-xs font-semibold text-zinc-400 tracking-wider uppercase flex items-center justify-between">
+            <div className="w-full flex-1 min-h-0 bg-zinc-950/70 border border-white/10 rounded-2xl p-4 flex flex-col gap-4 overflow-y-auto shadow-2xl">
+              <div className="text-xs font-semibold text-zinc-400 tracking-wider uppercase flex items-center justify-between shrink-0">
                 <span>Execution Log</span>
                 {loading && <span className="text-purple-400 animate-pulse">Synthesizing Codebase...</span>}
               </div>
 
               {steps.map((step, idx) => (
-                <div key={idx} className="space-y-2">
+                <div key={idx} className="space-y-2 shrink-0">
                   {step.type === "tool_step" && (
                     <div className="bg-zinc-900/60 border border-white/5 rounded-xl p-3 text-xs space-y-2">
                       <div className="text-purple-400 font-medium flex items-center gap-1.5">
@@ -427,12 +567,29 @@ export function Playground() {
               ))}
             </div>
           )}
+
+          {/* 4. COMPLETED STATE: DOCKED BOTTOM PROMPT BAR FOR ITERATIONS */}
+          {!loading && steps.length > 0 && (
+            <div className="w-full shrink-0">
+              <PromptBar
+                prompt={prompt}
+                setPrompt={setPrompt}
+                attachedFile={attachedFile}
+                removeAttachedFile={removeAttachedFile}
+                fileInputRef={fileInputRef}
+                handleFileChange={handleFileChange}
+                handleRun={handleRun}
+                loading={loading}
+                placeholderText={placeholderText}
+              />
+            </div>
+          )}
         </div>
 
         {/* RIGHT COLUMN: SYNTHESIZED FILE INSPECTOR PANEL */}
         {files.length > 0 && (
-          <div className="w-1/2 bg-zinc-950/80 border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-2xl">
-            <div className="h-12 border-b border-white/10 px-4 flex items-center justify-between bg-black/30">
+          <div className="w-1/2 bg-zinc-950/80 border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-2xl min-h-0">
+            <div className="h-12 border-b border-white/10 px-4 flex items-center justify-between bg-black/30 shrink-0">
               <div className="flex items-center space-x-2 overflow-x-auto">
                 <Code2 className="w-4 h-4 text-purple-400 shrink-0" />
                 <span className="text-xs text-zinc-400 shrink-0 font-medium mr-2">Synthesized Files:</span>
@@ -453,10 +610,10 @@ export function Playground() {
                 ))}
               </div>
 
-              <WorkspaceActions sessionId="default_session" />
+              <WorkspaceActions sessionId={sessionId} />
             </div>
 
-            <div className="flex-1 p-4 overflow-auto bg-black/60">
+            <div className="flex-1 p-4 overflow-auto bg-black/60 min-h-0">
               <pre className="text-xs font-mono text-zinc-200 leading-relaxed whitespace-pre">
                 {fileContent}
               </pre>
