@@ -335,7 +335,6 @@ function PromptBar({
 // MAIN PLAYGROUND COMPONENT
 // -----------------------------------------------------------------------------
 export function Playground() {
-  // DYNAMIC SESSION ID: Isolates each workspace session cleanly
   const [sessionId, setSessionId] = useState<string>(() => `session_${Date.now()}`);
 
   const [prompt, setPrompt] = useState("");
@@ -373,7 +372,7 @@ export function Playground() {
     if (!prompt.trim() && !attachedFile) return;
 
     const currentPrompt = prompt;
-    setPrompt(""); // Clear input bar for next prompt
+    setPrompt("");
 
     setLoading(true);
     
@@ -518,40 +517,16 @@ export function Playground() {
       </header>
 
       {/* MAIN WORKSPACE VIEW */}
-    <main className="flex-1 flex flex-col overflow-hidden z-10 p-6 gap-6 min-h-0">
-  {/* If no steps/files yet, show centered prompt view */}
-  {steps.length === 0 ? (
-    <div className="flex-1 flex flex-col items-center justify-center max-w-2xl mx-auto w-full text-center">
-      <h1 className="text-2xl font-bold tracking-tight text-white mb-2">G.L.A.S.S. Synthesis Engine</h1>
-      <p className="text-sm text-zinc-400 mb-6">Describe what software, API endpoint, or script you want G.L.A.S.S. to build.</p>
-      {/* Input box component here */}
-    </div>
-) : (
-  /* Split execution log & preview workspace view when active */
-  <div className="flex-1 flex gap-4 min-h-0 w-full">
-    {/* LEFT COLUMN (Execution Log) */}
-    <div 
-      ref={logContainerRef} 
-      className="flex-1 flex flex-col gap-4 overflow-y-auto overflow-x-hidden pr-2 min-h-0"
-    >
-      {/* Your execution log steps mapping goes here */}
-    </div>
-
-    {/* RIGHT COLUMN (Code Preview / Workspace Panel) */}
-    <div className="flex-1 flex flex-col min-h-0">
-      {/* Right panel code viewer components */}
-    </div>
-  </div>
-)}
-</main>
-        {/* LEFT COLUMN */}
-        <div 
-  ref={logContainerRef} 
-  className="flex-1 flex flex-col gap-4 overflow-y-auto overflow-x-hidden pr-2 min-h-0"
->
-          {/* 1. IDLE STATE: CENTERED PROMPT PILL (Before first run) */}
-          {!loading && steps.length === 0 && (
-            <div className="w-full max-w-2xl">
+      <main className="flex-1 flex overflow-hidden z-10 p-6 gap-6 min-h-0">
+        {steps.length === 0 ? (
+          /* IDLE STATE: CENTERED PROMPT PILL WITH HERO ORB */
+          <div className="flex-1 flex flex-col items-center justify-center max-w-2xl mx-auto w-full text-center">
+            <h1 className="text-2xl font-bold tracking-tight text-white mb-1">G.L.A.S.S. Synthesis Engine</h1>
+            <p className="text-sm text-zinc-400 mb-6">Describe what software, API endpoint, or script you want G.L.A.S.S. to build.</p>
+            
+            {loading ? (
+              <HeroOrb />
+            ) : (
               <PromptBar
                 prompt={prompt}
                 setPrompt={setPrompt}
@@ -563,106 +538,114 @@ export function Playground() {
                 loading={loading}
                 placeholderText={placeholderText}
               />
-            </div>
-          )}
-
-          {/* 2. SYNTHESIZING STATE: SHOW HERO ORB */}
-          {loading && <HeroOrb />}
-
-          {/* 3. EXECUTION LOG PANEL */}
-          {steps.length > 0 && (
-            <div 
-              ref={logContainerRef}
-              className="w-full flex-1 min-h-0 bg-zinc-950/70 border border-white/10 rounded-2xl p-4 flex flex-col gap-4 overflow-y-auto shadow-2xl custom-scrollbar"
-            >
-              <div className="text-xs font-semibold text-zinc-400 tracking-wider uppercase flex items-center justify-between shrink-0">
-                <span>Execution Log</span>
-                {loading && <span className="text-purple-400 animate-pulse">Synthesizing Codebase...</span>}
-              </div>
-
-              {steps.map((step, idx) => (
-                <div key={idx} className="space-y-2 shrink-0">
-                  {step.type === "tool_step" && (
-                    <div className="bg-zinc-900/60 border border-white/5 rounded-xl p-3 text-xs space-y-2">
-                      <div className="text-purple-400 font-medium flex items-center gap-1.5">
-                        <span>&gt;_ Step {step.iteration}: {step.tool}</span>
-                      </div>
-                      <pre className="text-zinc-300 overflow-x-auto p-2 bg-black/40 rounded-lg text-[11px] custom-scrollbar">
-                        {JSON.stringify(step.args, null, 2)}
-                      </pre>
-                      <div className="text-zinc-400 text-[11px] pt-1 border-t border-white/5">
-                        <span className="text-zinc-500 uppercase font-semibold">Output: </span>
-                        {step.output}
-                      </div>
-                    </div>
-                  )}
-
-                  {step.type === "completion" && (
-                    <div className="bg-purple-950/30 border border-purple-500/20 rounded-xl p-3 text-xs text-purple-200 flex items-start gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                      <div className="whitespace-pre-wrap">{step.content}</div>
-                    </div>
-                  )}
+            )}
+          </div>
+        ) : (
+          /* ACTIVE STATE: SPLIT VIEW (Execution Log on Left, Code Preview on Right) */
+          <div className="flex-1 flex gap-4 min-h-0 w-full overflow-hidden">
+            
+            {/* LEFT COLUMN: EXECUTION LOG & BOTTOM PROMPT BAR */}
+            <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden">
+              
+              {/* SYNTHESIZING HERO ORB OR LOGS */}
+              {loading && steps.length === 1 ? (
+                <div className="flex-1 flex items-center justify-center bg-zinc-950/70 border border-white/10 rounded-2xl">
+                  <HeroOrb />
                 </div>
-              ))}
-            </div>
-          )}
+              ) : (
+                <div 
+                  ref={logContainerRef}
+                  className="w-full flex-1 min-h-0 bg-zinc-950/70 border border-white/10 rounded-2xl p-4 flex flex-col gap-4 overflow-y-auto shadow-2xl custom-scrollbar"
+                >
+                  <div className="text-xs font-semibold text-zinc-400 tracking-wider uppercase flex items-center justify-between shrink-0 sticky top-0 bg-zinc-950/90 py-1 z-10">
+                    <span>Execution Log</span>
+                    {loading && <span className="text-purple-400 animate-pulse">Synthesizing Codebase...</span>}
+                  </div>
 
-          {/* 4. COMPLETED STATE: DOCKED BOTTOM PROMPT BAR FOR ITERATIONS */}
-          {!loading && steps.length > 0 && (
-            <div className="w-full shrink-0">
-              <PromptBar
-                prompt={prompt}
-                setPrompt={setPrompt}
-                attachedFile={attachedFile}
-                removeAttachedFile={removeAttachedFile}
-                fileInputRef={fileInputRef}
-                handleFileChange={handleFileChange}
-                handleRun={handleRun}
-                loading={loading}
-                placeholderText={placeholderText}
-              />
-            </div>
-          )}
-        </div>
+                  {steps.map((step, idx) => (
+                    <div key={idx} className="space-y-2 shrink-0">
+                      {step.type === "tool_step" && (
+                        <div className="bg-zinc-900/60 border border-white/5 rounded-xl p-3 text-xs space-y-2">
+                          <div className="text-purple-400 font-medium flex items-center gap-1.5">
+                            <span>&gt;_ Step {step.iteration}: {step.tool}</span>
+                          </div>
+                          <pre className="text-zinc-300 overflow-x-auto p-2 bg-black/40 rounded-lg text-[11px] custom-scrollbar">
+                            {JSON.stringify(step.args, null, 2)}
+                          </pre>
+                          <div className="text-zinc-400 text-[11px] pt-1 border-t border-white/5">
+                            <span className="text-zinc-500 uppercase font-semibold">Output: </span>
+                            {step.output}
+                          </div>
+                        </div>
+                      )}
 
-        {/* RIGHT COLUMN: SYNTHESIZED FILE INSPECTOR PANEL */}
-        {files.length > 0 && (
-          <div className="w-1/2 bg-zinc-950/80 border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-2xl min-h-0">
-            <div className="h-12 border-b border-white/10 px-4 flex items-center justify-between bg-black/30 shrink-0">
-              <div className="flex items-center space-x-2 overflow-x-auto custom-scrollbar">
-                <Code2 className="w-4 h-4 text-purple-400 shrink-0" />
-                <span className="text-xs text-zinc-400 shrink-0 font-medium mr-2">Synthesized Files:</span>
+                      {step.type === "completion" && (
+                        <div className="bg-purple-950/30 border border-purple-500/20 rounded-xl p-3 text-xs text-purple-200 flex items-start gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                          <div className="whitespace-pre-wrap">{step.content}</div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
 
-                {files.map((file) => (
-                  <button
-                    key={file}
-                    onClick={() => selectFile(file)}
-                    className={`flex items-center space-x-1 px-3 py-1 rounded-lg text-xs transition-all shrink-0 ${
-                      activeFile === file
-                        ? 'bg-purple-600/30 border border-purple-500/40 text-purple-200'
-                        : 'bg-zinc-900 text-zinc-400 hover:text-white'
-                    }`}
-                  >
-                    <FileCode className="w-3.5 h-3.5" />
-                    <span>{file}</span>
-                  </button>
-                ))}
+              {/* DOCKED BOTTOM PROMPT BAR FOR ITERATIONS */}
+              <div className="w-full shrink-0">
+                <PromptBar
+                  prompt={prompt}
+                  setPrompt={setPrompt}
+                  attachedFile={attachedFile}
+                  removeAttachedFile={removeAttachedFile}
+                  fileInputRef={fileInputRef}
+                  handleFileChange={handleFileChange}
+                  handleRun={handleRun}
+                  loading={loading}
+                  placeholderText={placeholderText}
+                />
               </div>
-
-              <WorkspaceActions sessionId={sessionId} />
             </div>
 
-            <div className="flex-1 p-4 overflow-auto bg-black/60 min-h-0 custom-scrollbar">
-              <pre className="text-xs font-mono text-zinc-200 leading-relaxed whitespace-pre">
-                {fileContent}
-              </pre>
-            </div>
+            {/* RIGHT COLUMN: SYNTHESIZED FILE INSPECTOR PANEL */}
+            {files.length > 0 && (
+              <div className="flex-1 bg-zinc-950/80 border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-2xl min-h-0">
+                <div className="h-12 border-b border-white/10 px-4 flex items-center justify-between bg-black/30 shrink-0">
+                  <div className="flex items-center space-x-2 overflow-x-auto custom-scrollbar">
+                    <Code2 className="w-4 h-4 text-purple-400 shrink-0" />
+                    <span className="text-xs text-zinc-400 shrink-0 font-medium mr-2">Synthesized Files:</span>
+
+                    {files.map((file) => (
+                      <button
+                        key={file}
+                        onClick={() => selectFile(file)}
+                        className={`flex items-center space-x-1 px-3 py-1 rounded-lg text-xs transition-all shrink-0 ${
+                          activeFile === file
+                            ? 'bg-purple-600/30 border border-purple-500/40 text-purple-200'
+                            : 'bg-zinc-900 text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        <FileCode className="w-3.5 h-3.5" />
+                        <span>{file}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <WorkspaceActions sessionId={sessionId} />
+                </div>
+
+                <div className="flex-1 p-4 overflow-auto bg-black/60 min-h-0 custom-scrollbar">
+                  <pre className="text-xs font-mono text-zinc-200 leading-relaxed whitespace-pre">
+                    {fileContent}
+                  </pre>
+                </div>
+              </div>
+            )}
+
           </div>
         )}
-      </div>
-
-    );
+      </main>
+    </div>
+  );
 }
 
 export default Playground;
