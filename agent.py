@@ -149,6 +149,7 @@ class CodeSanitizer:
                 setup_content = setup_content.replace("packages=find_packages()", f'py_modules=["{main_module}"]')
                 setup_content = setup_content.replace("from setuptools import setup, find_packages", "from setuptools import setup")
                 files_map[setup_key] = setup_content
+                print(f"[Code Sanitizer] Patched setup.py to use py_modules=['{main_module}']")
 
         if html_key and html_key in files_map:
             html_content = files_map[html_key]
@@ -159,6 +160,7 @@ class CodeSanitizer:
                     html_content
                 )
                 files_map[html_key] = html_content
+                print("[Code Sanitizer] Patched broken three.js CDN to stable cdnjs endpoint.")
 
         if html_key and js_key and html_key in files_map and js_key in files_map:
             html_content = files_map[html_key]
@@ -170,6 +172,7 @@ class CodeSanitizer:
             missing_ids = js_ids - html_ids
 
             if missing_ids:
+                print(f"[Code Sanitizer] Injecting missing HTML IDs to prevent JS crash: {missing_ids}")
                 injections = []
                 for missing_id in missing_ids:
                     if "button" in missing_id.lower() or "btn" in missing_id.lower():
@@ -299,9 +302,8 @@ class CodeExtractor:
 
 class GlassAgent:
     """Hybrid Cloud-Edge Agent Loop with universal multi-language verification and self-healing execution."""
-    
-    MAX_HEALING_TURNS = 3
 
+    MAX_HEALING_TURNS = 3
     def __init__(self, session_id: str = "default_session"):
         self.workspace = WorkspaceManager(session_id)
 
@@ -323,28 +325,32 @@ class GlassAgent:
             print(f"[Model Discovery Error]: {e}")
             return os.getenv("NEBIUS_MODEL", "meta-llama/Meta-Llama-3.1-70B-Instruct")
 
-    def _query_llm_engine(self, system_prompt: str, user_prompt: str) -> Tuple[Optional[str], str]:
+    def _query_llm_engine(self, system_prompt: str, user_prompt: str) -> Tuple[Optional[str], str, Optional[str]]:
         nebius_key = os.getenv("NEBIUS_API_KEY", "").strip()
+        api_error_log = None
         
         if nebius_key:
             try:
                 client = OpenAI(
-                    base_url="https://api.studio.nebius.ai/v1",
+                    base_url="https://api.tokenfactory.us-central1.nebius.com/v1/",
                     api_key=nebius_key,
                     timeout=90.0
                 )
-                model_target = self._get_available_nebius_model(client)
+                model_target = "deepseek-ai/DeepSeek-V4-Flash-0731"
+                
                 resp = client.chat.completions.create(
                     model=model_target,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
-                    temperature=0.1
+                    temperature=0.1,
+                    max_tokens=4096
                 )
-                return resp.choices[0].message.content, f"Nebius AI Cloud ({model_target.split('/')[-1]})"
+                return resp.choices[0].message.content, f"Nebius Token Factory ({model_target.split('/')[-1]})", None
             except Exception as e:
-                print(f"[Nebius Cloud Error]: {e}")
+                api_error_log = f"[Token Factory API Error]: {e}"
+                print(api_error_log)
 
         try:
             client = OpenAI(
@@ -358,13 +364,16 @@ class GlassAgent:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.2
+                temperature=0.2,
+                max_tokens=4096
             )
-            return resp.choices[0].message.content, "Local Ollama (Qwen2.5-Coder 7B on Metal)"
+            return resp.choices[0].message.content, "Local Ollama (Qwen2.5-Coder 7B on Metal)", None
         except Exception as e:
+            if not api_error_log:
+                api_error_log = f"[Local Ollama Error]: {e}"
             print(f"[Local Ollama Error]: {e}")
 
-        return None, "Offline Synthesizer Engine"
+        return None, "Offline Synthesizer Engine", api_error_log
 
     def execute(self, prompt: str, file_name: Optional[str] = None, file_content: Optional[str] = None) -> Dict[str, Any]:
         steps = []
@@ -415,14 +424,15 @@ class GlassAgent:
         final_files_dict: Dict[str, str] = {}
         last_engine_used = "Offline Synthesizer Engine"
 
-        # 2. ITERATIVE SELF-HEALING AUDIT & VERIFICATION LOOP
         for turn in range(1, self.MAX_HEALING_TURNS + 1):
-            raw_output, engine_used = self._query_llm_engine(system_instruction, current_prompt)
+            raw_output, engine_used, api_error_log = self._query_llm_engine(system_instruction, current_prompt)
             last_engine_used = engine_used
 
             if not raw_output:
-                raw_output = self._generate_dynamic_fallback(prompt, file_name, file_content)
-
+                # Stop fallback generation and raise the actual error so it displays in your Execution Log
+                error_msg = api_error_log or "Unknown API timeout or empty response from Nebius AI Cloud."
+                raise RuntimeError(f"Synthesis Failed: {error_msg}")
+            
             target_name = file_name if file_name else ""
             parsed_list = CodeExtractor.parse_response(raw_output, prompt, target_name)
             files_dict = {filename: content for filename, content in parsed_list}
@@ -442,7 +452,7 @@ class GlassAgent:
                         "status": "Running AST compilation, syntax verification, and multi-file contract audit...",
                         "defects_found": 0
                     },
-                    "output": f"Codebase verified 100% bug-free (0 defects). Passed multi-language compilation audit (via {engine_used})."
+                    "output": f"Codebase verified 100% bug-free (0 defects). Passed multi-language compilation audit (via {last_engine_used})."
                 })
                 break
             else:
@@ -466,7 +476,6 @@ class GlassAgent:
                         f"Refine the code, fix ALL listed defects, ensure full cross-file consistency, and return the complete corrected code blocks."
                     )
 
-        # 3. COMMIT VERIFIED FILES TO WORKSPACE & EMIT REACT TOOL STEPS
         created_paths = []
         start_step = len(steps) + 1
 
@@ -474,7 +483,6 @@ class GlassAgent:
             write_status = self.workspace.write_file(filename, content)
             created_paths.append(filename)
             
-            # CRITICAL: This tool step populates the React frontend's right-side inspector panel, Export .zip, and Git Push!
             tool_name = "refine_codebase" if file_name else "create_or_update_file"
             steps.append({
                 "type": "tool_step",
@@ -508,7 +516,7 @@ class GlassAgent:
             "files": created_paths
         }
 
-    def _generate_dynamic_fallback(self, prompt: str, file_name: Optional[str], file_content: Optional[str]) -> str:
+def _generate_dynamic_fallback(self, prompt: str, file_name: Optional[str], file_content: Optional[str]) -> str:
         if file_name and file_content:
             return (
                 f"```{file_name}\n"
@@ -523,7 +531,7 @@ class GlassAgent:
                 return "```python:main.py\ndef main():\n    print('G.L.A.S.S. Core initialized.')\n\nif __name__ == '__main__':\n    main()\n```"
             elif "c++" in p or "cpp" in p:
                 return "```cpp:main.cpp\n#include <iostream>\n\nint main() {\n    std::cout << \"G.L.A.S.S. Core initialized.\" << std::endl;\n    return 0;\n}\n```"
-            elif "java" in p:
+            elif re.search(r'\bjava\b', p) and "javascript" not in p:
                 return "```java:Main.java\npublic class Main {\n    public static void main(String[] args) {\n        System.out.println(\"G.L.A.S.S. Core initialized.\");\n    }\n}\n```"
             elif "rust" in p or "rs" in p:
                 return "```rust:main.rs\nfn main() {\n    println!(\"G.L.A.S.S. Core initialized.\");\n}\n```"

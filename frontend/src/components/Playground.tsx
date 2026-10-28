@@ -518,10 +518,37 @@ export function Playground() {
       </header>
 
       {/* MAIN WORKSPACE VIEW */}
-      <main className="flex-1 flex overflow-hidden z-10 p-6 gap-6 min-h-0">
+    <main className="flex-1 flex flex-col overflow-hidden z-10 p-6 gap-6 min-h-0">
+  {/* If no steps/files yet, show centered prompt view */}
+  {steps.length === 0 ? (
+    <div className="flex-1 flex flex-col items-center justify-center max-w-2xl mx-auto w-full text-center">
+      <h1 className="text-2xl font-bold tracking-tight text-white mb-2">G.L.A.S.S. Synthesis Engine</h1>
+      <p className="text-sm text-zinc-400 mb-6">Describe what software, API endpoint, or script you want G.L.A.S.S. to build.</p>
+      {/* Input box component here */}
+    </div>
+) : (
+  /* Split execution log & preview workspace view when active */
+  <div className="flex-1 flex gap-4 min-h-0 w-full">
+    {/* LEFT COLUMN (Execution Log) */}
+    <div 
+      ref={logContainerRef} 
+      className="flex-1 flex flex-col gap-4 overflow-y-auto overflow-x-hidden pr-2 min-h-0"
+    >
+      {/* Your execution log steps mapping goes here */}
+    </div>
+
+    {/* RIGHT COLUMN (Code Preview / Workspace Panel) */}
+    <div className="flex-1 flex flex-col min-h-0">
+      {/* Right panel code viewer components */}
+    </div>
+  </div>
+)}
+</main>
         {/* LEFT COLUMN */}
-        <div className={`flex flex-col transition-all duration-500 min-h-0 ${files.length > 0 ? 'w-1/2 gap-4' : 'w-full max-w-4xl mx-auto justify-center items-center gap-4'}`}>
-          
+        <div 
+  ref={logContainerRef} 
+  className="flex-1 flex flex-col gap-4 overflow-y-auto overflow-x-hidden pr-2 min-h-0"
+>
           {/* 1. IDLE STATE: CENTERED PROMPT PILL (Before first run) */}
           {!loading && steps.length === 0 && (
             <div className="w-full max-w-2xl">
@@ -633,9 +660,9 @@ export function Playground() {
             </div>
           </div>
         )}
-      </main>
-    </div>
-  );
+      </div>
+
+    );
 }
 
 export default Playground;
