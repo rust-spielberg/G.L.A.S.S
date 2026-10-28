@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solar System Explorer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="controls">
+        <button id="pauseBtn">Pause</button>
+        <button id="resumeBtn">Resume</button>
+        <button id="zoomInBtn">Zoom In</button>
+        <button id="zoomOutBtn">Zoom Out</button>
+        <input type="range" id="orbitSpeed" min="0.1" max="5" step="0.1" value="1">
+        <label for="orbitSpeed">Orbit Speed: 1</label>
+    </div>
+    <div id="planetInfo">
+        <h2>Selected Planet</h2>
+        <p id="planetName"></p>
+        <p id="planetDesc"></p>
+    </div>
+    <canvas id="solarSystemCanvas"></canvas>
+    <script src="https://threejs.org/build/three.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

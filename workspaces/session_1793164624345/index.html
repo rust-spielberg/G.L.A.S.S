@@ -1,0 +1,81 @@
+<!-- index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flappy Bird</title>
+    <style>
+        canvas {
+            border: 1px solid black;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="400" height="400"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let bird = {
+            x: 50,
+            y: 200,
+            velocity: 0,
+            gravity: 1
+        };
+
+        let pipe = {
+            x: 400,
+            height: Math.floor(Math.random() * 300) + 100
+        };
+
+        let gameInterval;
+
+        function updateGame() {
+            const gameState = fetch('game_state.txt')
+                .then(response => response.text())
+                .then(text => {
+                    const lines = text.split('\n');
+                    bird.y = parseInt(lines[0].split(': ')[1]);
+                    pipe.x = parseInt(lines[1].split(': ')[1]);
+                    pipe.height = parseInt(lines[2].split(': ')[1]);
+                });
+
+            bird.velocity += bird.gravity;
+            bird.y += bird.velocity;
+
+            if (bird.y <= 0 || bird.y >= 400) {
+                clearInterval(gameInterval);
+                alert('Game Over');
+            }
+
+            if (pipe.x <= 0 && pipe.x >= -50) {
+                if (bird.y < pipe.height || bird.y > pipe.height + 100) {
+                    clearInterval(gameInterval);
+                    alert('Game Over');
+                }
+            }
+
+            pipe.x -= 2;
+
+            if (pipe.x <= -50) {
+                pipe.x = 400;
+                pipe.height = Math.floor(Math.random() * 300) + 100;
+            }
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'green';
+            ctx.fillRect(bird.x, bird.y, 20, 20);
+            ctx.fillStyle = 'blue';
+            ctx.fillRect(pipe.x, 0, 50, pipe.height);
+            ctx.fillRect(pipe.x, pipe.height + 100, 50, canvas.height - pipe.height - 100);
+        }
+
+        gameInterval = setInterval(updateGame, 100);
+
+        canvas.addEventListener('click', () => {
+            bird.velocity = -10;
+        });
+    </script>
+</body>
+</html>

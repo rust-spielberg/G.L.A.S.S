@@ -1,0 +1,25 @@
+body {
+    margin: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 100vh;
+    background: #000;
+    font-family: Arial, sans-serif;
+}
+
+#controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+#planetInfo {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+canvas {
+    flex-grow: 1;
+}

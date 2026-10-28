@@ -16,8 +16,11 @@ import {
   FileText
 } from 'lucide-react';
 
+// DYNAMIC BACKEND API BASE URL (Allows smooth transition between Localhost & Render)
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+
 // -----------------------------------------------------------------------------
-// 3D FIBONACCI PARTICLE SYNTHESIS ORB
+// 3D FIBONACCI PARTICLE SYNTHESIS ORB (60 FPS CANVAS ENGINE)
 // -----------------------------------------------------------------------------
 function HeroOrb() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -115,7 +118,7 @@ function WorkspaceActions({ sessionId }: { sessionId: string }) {
   const [pushStatus, setPushStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const handleDownloadZip = () => {
-    window.location.href = `http://localhost:8000/api/workspace/download/${sessionId}`;
+    window.location.href = `${API_BASE_URL}/api/workspace/download/${sessionId}`;
   };
 
   const handleGitPush = async (e: React.FormEvent) => {
@@ -126,7 +129,7 @@ function WorkspaceActions({ sessionId }: { sessionId: string }) {
     setPushStatus(null);
 
     try {
-      const res = await fetch("http://localhost:8000/api/workspace/git-push", {
+      const res = await fetch(`${API_BASE_URL}/api/workspace/git-push`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -345,6 +348,14 @@ export function Playground() {
   const [fileContent, setFileContent] = useState<string>("");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const logContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // AUTO-SCROLL EXECUTION LOG TO LATEST STEP
+  useEffect(() => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [steps]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -396,7 +407,7 @@ export function Playground() {
         formData.append("file", attachedFile);
       }
 
-      const res = await fetch("http://localhost:8000/api/agent/run", {
+      const res = await fetch(`${API_BASE_URL}/api/agent/run`, {
         method: "POST",
         body: formData
       });
@@ -445,7 +456,6 @@ export function Playground() {
   };
 
   const handleReset = () => {
-    // Generate a new session ID for the new synthesis
     setSessionId(`session_${Date.now()}`);
     setPrompt("");
     setAttachedFile(null);
@@ -461,7 +471,7 @@ export function Playground() {
   const selectFile = async (filename: string) => {
     setActiveFile(filename);
     try {
-      const res = await fetch(`http://localhost:8000/api/workspace/file/${filename}?session_id=${sessionId}`);
+      const res = await fetch(`${API_BASE_URL}/api/workspace/file/${filename}?session_id=${sessionId}`);
       const data = await res.json();
       setFileContent(data.content || "");
     } catch {
@@ -534,7 +544,10 @@ export function Playground() {
 
           {/* 3. EXECUTION LOG PANEL */}
           {steps.length > 0 && (
-            <div className="w-full flex-1 min-h-0 bg-zinc-950/70 border border-white/10 rounded-2xl p-4 flex flex-col gap-4 overflow-y-auto shadow-2xl">
+            <div 
+              ref={logContainerRef}
+              className="w-full flex-1 min-h-0 bg-zinc-950/70 border border-white/10 rounded-2xl p-4 flex flex-col gap-4 overflow-y-auto shadow-2xl custom-scrollbar"
+            >
               <div className="text-xs font-semibold text-zinc-400 tracking-wider uppercase flex items-center justify-between shrink-0">
                 <span>Execution Log</span>
                 {loading && <span className="text-purple-400 animate-pulse">Synthesizing Codebase...</span>}
@@ -547,7 +560,7 @@ export function Playground() {
                       <div className="text-purple-400 font-medium flex items-center gap-1.5">
                         <span>&gt;_ Step {step.iteration}: {step.tool}</span>
                       </div>
-                      <pre className="text-zinc-300 overflow-x-auto p-2 bg-black/40 rounded-lg text-[11px]">
+                      <pre className="text-zinc-300 overflow-x-auto p-2 bg-black/40 rounded-lg text-[11px] custom-scrollbar">
                         {JSON.stringify(step.args, null, 2)}
                       </pre>
                       <div className="text-zinc-400 text-[11px] pt-1 border-t border-white/5">
@@ -590,7 +603,7 @@ export function Playground() {
         {files.length > 0 && (
           <div className="w-1/2 bg-zinc-950/80 border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-2xl min-h-0">
             <div className="h-12 border-b border-white/10 px-4 flex items-center justify-between bg-black/30 shrink-0">
-              <div className="flex items-center space-x-2 overflow-x-auto">
+              <div className="flex items-center space-x-2 overflow-x-auto custom-scrollbar">
                 <Code2 className="w-4 h-4 text-purple-400 shrink-0" />
                 <span className="text-xs text-zinc-400 shrink-0 font-medium mr-2">Synthesized Files:</span>
 
@@ -613,7 +626,7 @@ export function Playground() {
               <WorkspaceActions sessionId={sessionId} />
             </div>
 
-            <div className="flex-1 p-4 overflow-auto bg-black/60 min-h-0">
+            <div className="flex-1 p-4 overflow-auto bg-black/60 min-h-0 custom-scrollbar">
               <pre className="text-xs font-mono text-zinc-200 leading-relaxed whitespace-pre">
                 {fileContent}
               </pre>
