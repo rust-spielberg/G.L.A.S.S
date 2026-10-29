@@ -19,46 +19,36 @@ ALLOWED_ORIGINS = [
 ]
 
 raw_origins = os.getenv("CORS_ORIGINS", "").strip()
-if raw_origins and raw_origins != "*":
+if raw_origins:
     for o in raw_origins.split(","):
         clean = o.strip()
         if clean and clean not in ALLOWED_ORIGINS:
             ALLOWED_ORIGINS.append(clean)
 
 # =============================================================================
-# 1. GUARANTEED PURE ASGI CORS MIDDLEWARE (Compatible with StreamingResponse)
+# 1. GLOBAL CORS INTERCEPTOR (Handles OPTIONS preflights cleanly)
 # =============================================================================
-class PureASGICORSMiddleware:
-    def __init__(self, app):
-        self.app = app
+@app.middleware("http")
+async def cors_options_interceptor(request: Request, call_next):
+    origin = request.headers.get("origin", "https://glass-ai-agent.netlify.app")
+    
+    # Intercept preflight OPTIONS requests before body parsing/validation
+    if request.method == "OPTIONS":
+        response = Response(status_code=200)
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PUT, DELETE, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = request.headers.get("access-control-request-headers", "*")
+        return response
 
-    async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        origin = "https://glass-ai-agent.netlify.app"
-        for header, value in scope.get("headers", []):
-            if header.lower() == b"origin":
-                origin = value.decode("utf-8")
-                break
-
-        async def send_with_cors(message):
-            if message["type"] == "http.response.start":
-                headers = list(message.get("headers", []))
-                # Append CORS headers cleanly without duplicate keys
-                headers = [(k, v) for k, v in headers if not k.lower().startswith(b"access-control-")]
-                headers.append((b"access-control-allow-origin", origin.encode()))
-                headers.append((b"access-control-allow-credentials", b"true"))
-                headers.append((b"access-control-allow-methods", b"GET, POST, OPTIONS, PUT, DELETE, PATCH"))
-                headers.append((b"access-control-allow-headers", b"*"))
-                headers.append((b"access-control-expose-headers", b"*"))
-                message["headers"] = headers
-            await send(message)
-
-        await self.app(scope, receive, send_with_cors)
-
-app.add_middleware(PureASGICORSMiddleware)
+    response = await call_next(request)
+    
+    # Ensure outgoing HTTP responses retain CORS origin headers
+    if "access-control-allow-origin" not in response.headers:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        
+    return response
 
 app.add_middleware(
     CORSMiddleware,
@@ -71,7 +61,7 @@ app.add_middleware(
 )
 
 # =============================================================================
-# 2. GLOBAL EXCEPTION HANDLER (Ensures JSON errors always have CORS headers)
+# 2. GLOBAL EXCEPTION HANDLER (Ensures JSON errors always carry CORS headers)
 # =============================================================================
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -87,19 +77,9 @@ async def global_exception_handler(request: Request, exc: Exception):
         }
     )
 
-# Explicit OPTIONS preflight handler (Express equivalent: app.options('*', cors()))
-@app.options("/{rest_of_path:path}")
-async def preflight_catchall(rest_of_path: str):
-    return Response(
-        status_code=200,
-        headers={
-            "Access-Control-Allow-Origin": "https://glass-ai-agent.netlify.app",
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE, PATCH",
-            "Access-Control-Allow-Headers": "*",
-        }
-    )
-
+# =============================================================================
+# 3. AGENT RUN ENDPOINT
+# =============================================================================
 @app.post("/api/agent/run")
 async def run_agent(request: Request):
     try:
@@ -153,10 +133,13 @@ async def run_agent(request: Request):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"     # Disables Nginx/Render response buffering
+            "X-Accel-Buffering": "no"
         }
     )
 
+# =============================================================================
+# 4. WORKSPACE ENDPOINTS
+# =============================================================================
 @app.get("/api/workspace/file/{filename:path}")
 def read_workspace_file(filename: str, session_id: str = "default_session"):
     try:
@@ -189,6 +172,7 @@ def download_workspace(session_id: str):
         filename=f"glass_workspace_{session_id}.zip",
         media_type="application/zip"
     )
+
 @app.get("/")
 def health_check():
     return {"status": "ok", "message": "G.L.A.S.S. backend service is live"}
