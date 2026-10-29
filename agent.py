@@ -234,7 +234,136 @@ class UniversalCodeVerifier:
                             f"Web Audio API Error in '{filename}': Redundant setValueAtTime scheduled at the exact ramp target timestamp '{ramp_collision_match.group(1)}'. Remove this setValueAtTime call."
                         )
 
+        # 7. Universal Interaction Completeness Audit
+        defects.extend(cls._check_interaction_completeness(files_map))
+
         return defects
+
+    @classmethod
+    def _check_interaction_completeness(cls, files_map: Dict[str, str]) -> List[str]:
+        """
+        Universal interaction audit — checks that ALL interactive elements are wired up
+        with event handlers. Catches 'looks good but broken' bugs across every app type:
+        calculators, games, forms, sliders, dropdowns, canvas apps, etc.
+        """
+        issues = []
+
+        html_content = ""
+        js_content = ""
+        has_html = False
+
+        for fname, content in files_map.items():
+            if fname.endswith(".html"):
+                html_content += content + "\n"
+                has_html = True
+            if fname.endswith(".js"):
+                js_content += content + "\n"
+
+        if not has_html:
+            return issues  # Only audit web/HTML projects
+
+        # Combine inline <script> blocks with external JS files
+        inline_scripts = re.findall(r"<script[^>]*>(.*?)</script>", html_content, re.DOTALL | re.IGNORECASE)
+        combined_js = js_content + "\n".join(inline_scripts)
+
+        has_click_handlers = (
+            "addEventListener('click'" in combined_js
+            or 'addEventListener("click"' in combined_js
+            or "onclick" in html_content
+            or "onclick" in combined_js
+            or ".click(" in combined_js
+            or "querySelectorAll" in combined_js  # bulk handler registration
+        )
+
+        # Check 1: Orphaned buttons — buttons exist but no click handler anywhere
+        button_count = len(re.findall(r"<button[\s>]", html_content, re.IGNORECASE))
+        if button_count > 0 and not has_click_handlers:
+            issues.append(
+                f"Interaction Gap: {button_count} <button> element(s) found but no click event handler detected. "
+                "Every button must have onclick attribute or addEventListener('click', handler). "
+                "Buttons that do nothing on click are broken UI."
+            )
+
+        # Check 2: Dead forms — form exists but no submit handler
+        has_forms = bool(re.search(r"<form[\s>]", html_content, re.IGNORECASE))
+        has_submit_handler = (
+            "addEventListener('submit'" in combined_js
+            or 'addEventListener("submit"' in combined_js
+            or "onsubmit" in html_content
+            or "onsubmit" in combined_js
+        )
+        if has_forms and not has_submit_handler:
+            issues.append(
+                "Interaction Gap: <form> element detected but no submit event handler found. "
+                "Add addEventListener('submit', handler) with event.preventDefault() to handle form submission without page reload."
+            )
+
+        # Check 3: Keyboard gap — interactive UI needs keydown/keyup listener
+        is_keyboard_app = (
+            bool(re.search(r'<input[^>]*type=["\']text["\']', html_content, re.IGNORECASE))
+            or "getContext(" in combined_js                                          # canvas game
+            or bool(re.search(r"<button[^>]*>[0-9\+\-\*\/\=\.\(\)%]", html_content))  # calculator buttons
+            or "ArrowUp" in combined_js or "ArrowDown" in combined_js               # partial keyboard code
+            or "keyCode" in combined_js                                             # legacy keyboard usage
+            or bool(re.search(r'<input[^>]*type=["\']number["\']', html_content, re.IGNORECASE))
+        )
+        has_keyboard_listener = (
+            "keydown" in combined_js
+            or "keyup" in combined_js
+            or "keypress" in combined_js
+            or "onkeydown" in html_content
+            or "onkeyup" in html_content
+        )
+        if is_keyboard_app and not has_keyboard_listener:
+            issues.append(
+                "Interaction Gap: Keyboard-driven UI detected (text input / canvas game / calculator) but "
+                "no keyboard event listener found. Add document.addEventListener('keydown', handler) "
+                "with complete key mapping. Bind to document or window — NEVER to a <div> or <canvas>."
+            )
+
+        # Check 4: Keyboard bound to unfocusable <div> (silently ignored by browser)
+        if re.search(r'<div[^>]+onkey(?:down|up|press)', html_content, re.IGNORECASE):
+            issues.append(
+                "Interaction Gap: Keyboard event bound directly to a <div> element via onkeydown/onkeyup attribute. "
+                "<div> elements cannot receive keyboard focus unless tabindex is set. "
+                "Move the keyboard listener to document or window: document.addEventListener('keydown', handler)."
+            )
+
+        # Check 5: Dead sliders / dropdowns — range inputs or selects with no change handler
+        has_range = bool(re.search(r'<input[^>]*type=["\']range["\']', html_content, re.IGNORECASE))
+        has_select = bool(re.search(r"<select[\s>]", html_content, re.IGNORECASE))
+        has_input_change_handler = (
+            "addEventListener('input'" in combined_js
+            or 'addEventListener("input"' in combined_js
+            or "addEventListener('change'" in combined_js
+            or 'addEventListener("change"' in combined_js
+            or "oninput" in html_content
+            or "onchange" in html_content
+        )
+        if (has_range or has_select) and not has_input_change_handler:
+            issues.append(
+                "Interaction Gap: Range slider or <select> dropdown found but no input/change event handler detected. "
+                "Add addEventListener('input', handler) or addEventListener('change', handler) — "
+                "otherwise moving the slider or changing the dropdown does nothing."
+            )
+
+        # Check 6: Init/start function defined but never called (app loads blank)
+        init_fn_match = re.search(
+            r'\bfunction\s+(init|start|main|initGame|startGame|setup|initialize|run|launch|boot)\s*\(',
+            combined_js
+        )
+        if init_fn_match:
+            fn_name = init_fn_match.group(1)
+            # Count total occurrences of the name being used (definition + call = at least 2)
+            call_occurrences = len(re.findall(r'\b' + fn_name + r'\s*\(', combined_js))
+            if call_occurrences < 2:
+                issues.append(
+                    f"Interaction Gap: Function '{fn_name}()' is defined but never called. "
+                    f"The application will load as a blank screen. "
+                    f"Add '{fn_name}();' at the bottom of the script to initialize and start the app."
+                )
+
+        return issues
 
 
 class UIUXGuardrailInspector:
@@ -582,7 +711,13 @@ class GlassAgent:
             "   - UI & Typography: Import Google Fonts ('Inter', 'Orbitron', or 'Press Start 2P') via CDN <link> in index.html. Style HUDs and cards with glassmorphism (`backdrop-filter: blur(12px)`, translucent borders `rgba(255,255,255,0.1)`, `border-radius: 12px`), with smooth active/hover button transitions.\n"
             "12. STRICT PROMPT COMPLIANCE & ACCURATE TARGET TECHNOLOGY:\n"
             "   - Read the user prompt in its entirety. Fully implement every feature, mathematical operation, UI element, and detailed requirement requested.\n"
-            "   - TARGET THE EXACT REQUESTED TECHNOLOGY & FILENAMES: If the prompt specifies index.html, HTML, web application, CSS, or JS, you MUST produce index.html, style.css, and script.js. NEVER return a Python script (main.py) when web/HTML was requested."
+            "   - TARGET THE EXACT REQUESTED TECHNOLOGY & FILENAMES: If the prompt specifies index.html, HTML, web application, CSS, or JS, you MUST produce index.html, style.css, and script.js. NEVER return a Python script (main.py) when web/HTML was requested.\n"
+            "13. UNIVERSAL INTERACTIVE COMPLETENESS STANDARD (applies to ALL app types):\n"
+            "   - Button Handlers: Every single <button> element MUST have a working click handler (onclick attribute or addEventListener('click', ...)). Buttons that do nothing on click are broken and unacceptable.\n"
+            "   - Form Handlers: Every <form> MUST have a submit handler with event.preventDefault() to prevent page reload.\n"
+            "   - Keyboard Events: For ANY app with keyboard-driven interaction (calculators, games, terminals, text editors, quiz apps, drawing tools), you MUST implement document.addEventListener('keydown', handler) with COMPLETE key mapping covering all relevant keys. NEVER bind keyboard events to a <div> or <canvas> — they are not focusable. Always bind to document or window.\n"
+            "   - Slider & Dropdown Handlers: Every <input type='range'> and <select> element MUST have an input or change event listener that updates the UI or state in real-time.\n"
+            "   - Initialization Call: If you define an init(), start(), main(), startGame(), setup(), or boot() function, you MUST call it at the very bottom of the script — outside any event listener. Apps that define but never call their entry point load as blank screens."
         )
 
         # Build initial prompt with uploaded file content or existing workspace context
@@ -776,7 +911,13 @@ class GlassAgent:
             "   - UI & Typography: Import Google Fonts ('Inter', 'Orbitron', or 'Press Start 2P') via CDN <link> in index.html. Style HUDs and cards with glassmorphism (`backdrop-filter: blur(12px)`, translucent borders `rgba(255,255,255,0.1)`, `border-radius: 12px`), with smooth active/hover button transitions.\n"
             "12. STRICT PROMPT COMPLIANCE & ACCURATE TARGET TECHNOLOGY:\n"
             "   - Read the user prompt in its entirety. Fully implement every feature, mathematical operation, UI element, and detailed requirement requested.\n"
-            "   - TARGET THE EXACT REQUESTED TECHNOLOGY & FILENAMES: If the prompt specifies index.html, HTML, web application, CSS, or JS, you MUST produce index.html, style.css, and script.js. NEVER return a Python script (main.py) when web/HTML was requested."
+            "   - TARGET THE EXACT REQUESTED TECHNOLOGY & FILENAMES: If the prompt specifies index.html, HTML, web application, CSS, or JS, you MUST produce index.html, style.css, and script.js. NEVER return a Python script (main.py) when web/HTML was requested.\n"
+            "13. UNIVERSAL INTERACTIVE COMPLETENESS STANDARD (applies to ALL app types):\n"
+            "   - Button Handlers: Every single <button> element MUST have a working click handler (onclick attribute or addEventListener('click', ...)). Buttons that do nothing on click are broken and unacceptable.\n"
+            "   - Form Handlers: Every <form> MUST have a submit handler with event.preventDefault() to prevent page reload.\n"
+            "   - Keyboard Events: For ANY app with keyboard-driven interaction (calculators, games, terminals, text editors, quiz apps, drawing tools), you MUST implement document.addEventListener('keydown', handler) with COMPLETE key mapping covering all relevant keys. NEVER bind keyboard events to a <div> or <canvas> — they are not focusable. Always bind to document or window.\n"
+            "   - Slider & Dropdown Handlers: Every <input type='range'> and <select> element MUST have an input or change event listener that updates the UI or state in real-time.\n"
+            "   - Initialization Call: If you define an init(), start(), main(), startGame(), setup(), or boot() function, you MUST call it at the very bottom of the script — outside any event listener. Apps that define but never call their entry point load as blank screens."
         )
 
         # ── Step 0: Emit immediate "querying engine" step so frontend shows activity ──
