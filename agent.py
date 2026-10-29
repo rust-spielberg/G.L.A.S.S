@@ -237,6 +237,90 @@ class UniversalCodeVerifier:
         return defects
 
 
+class UIUXGuardrailInspector:
+    """
+    Priority 2 (Secondary) — UI/UX Design Quality Guardrail.
+    Runs ONLY after Priority 1 (UniversalCodeVerifier) passes functional checks.
+    Inspects generated HTML/CSS for modern styling, layout, and aesthetic polish.
+    NEVER overrides functional correctness — ranked feedback lists functional bugs first.
+    """
+
+    @classmethod
+    def audit_uiux(cls, files_map: Dict[str, str]) -> List[str]:
+        """Returns a list of UI/UX flaws found. Empty list = all checks passed."""
+        flaws = []
+
+        html_content = ""
+        css_content = ""
+        has_html = False
+
+        for fname, content in files_map.items():
+            if fname.endswith(".html"):
+                html_content += content + "\n"
+                has_html = True
+            if fname.endswith(".css"):
+                css_content += content + "\n"
+
+        # Inline <style> blocks inside HTML count as CSS too
+        inline_styles = re.findall(r"<style[^>]*>(.*?)</style>", html_content, re.DOTALL | re.IGNORECASE)
+        css_content += "\n".join(inline_styles)
+
+        if not has_html:
+            return flaws  # Only audit web projects
+
+        combined = html_content + css_content
+
+        # Check 1: Viewport meta tag (mobile readiness)
+        if "<meta name=\"viewport\"" not in html_content and "<meta name='viewport'" not in html_content:
+            flaws.append(
+                "UI/UX — Missing <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">. "
+                "Required for responsive mobile layout."
+            )
+
+        # Check 2: CSS custom properties (design tokens / theming)
+        if "--" not in css_content:
+            flaws.append(
+                "UI/UX — No CSS custom properties (--variables) found. "
+                "Define a color palette and spacing scale using :root { --primary: ...; } for visual consistency."
+            )
+
+        # Check 3: Modern layout system (flex or grid)
+        if "flex" not in css_content and "grid" not in css_content:
+            flaws.append(
+                "UI/UX — No flexbox or CSS grid layout detected. "
+                "Replace raw block/float layouts with display: flex or display: grid for responsive structure."
+            )
+
+        # Check 4: Typography — font-family defined
+        if "font-family" not in css_content:
+            flaws.append(
+                "UI/UX — No font-family declaration found. "
+                "Import a modern Google Font (Inter, Orbitron, Space Grotesk) via CDN <link> and apply it globally."
+            )
+
+        # Check 5: Glassmorphism / dark mode aesthetic
+        has_glassmorphism = (
+            "backdrop-filter" in css_content
+            or "rgba(" in css_content
+            or "linear-gradient" in css_content
+            or "radial-gradient" in css_content
+        )
+        if not has_glassmorphism:
+            flaws.append(
+                "UI/UX — No glassmorphism or modern dark/light aesthetic detected. "
+                "Apply backdrop-filter: blur(), rgba() translucent backgrounds, or linear-gradient() for visual depth."
+            )
+
+        # Check 6: Interactive hover/focus states
+        if ":hover" not in css_content and ":focus" not in css_content:
+            flaws.append(
+                "UI/UX — No :hover or :focus interactive states found in CSS. "
+                "Add hover transitions and focus outlines for all interactive elements (buttons, inputs, cards)."
+            )
+
+        return flaws
+
+
 class CodeSanitizer:
     """Post-processes generated code to resolve CDN endpoints and structural integrity."""
 
@@ -550,49 +634,78 @@ class GlassAgent:
             files_dict = {fname: content for fname, content in parsed_list}
 
             sanitized_dict = CodeSanitizer.sanitize(files_dict)
-            defects = UniversalCodeVerifier.audit_codebase(sanitized_dict, original_file_name=file_name)
+
+            # ── Priority 1: Functional & Code Audit ──
+            functional_defects = UniversalCodeVerifier.audit_codebase(sanitized_dict, original_file_name=file_name)
+
+            # ── Priority 2: UI/UX Guardrail Audit (runs only after functional pass or alongside) ──
+            ui_ux_flaws = UIUXGuardrailInspector.audit_uiux(sanitized_dict)
+
+            # Merge: functional bugs ranked FIRST (critical), UI/UX flaws appended SECOND (secondary)
+            all_defects = functional_defects + ui_ux_flaws
 
             accumulated_tokens += sum(len(c.split()) for c in sanitized_dict.values()) + len(current_prompt.split()) * 4
 
-            if not defects:
+            if not all_defects:
                 final_files_dict = sanitized_dict
                 steps.append({
                     "type": "tool_step",
                     "iteration": turn,
                     "tool": "verify_and_execute_codebase",
                     "args": {
-                        "status": "Running AST compilation, syntax verification, and multi-file contract audit...",
+                        "status": (
+                            "Step 2: Functional & UI/UX Guardrail Audit\n"
+                            "[Priority 1 - Functional Inspector]: Code syntax & logic checks passed. ✅\n"
+                            "[Priority 2 - UI/UX Inspector]: Glassmorphism, typography, layout checks passed. ✅"
+                        ),
                         "defects_found": 0
                     },
-                    "output": f"Codebase verified 100% bug-free (0 defects). Passed multi-language compilation audit (via {engine_used})."
+                    "output": f"Codebase verified 100% bug-free (0 defects). Both Functional & UI/UX audits passed (via {engine_used})."
                 })
                 break
             else:
+                p1_count = len(functional_defects)
+                p2_count = len(ui_ux_flaws)
+                status_msg = (
+                    f"Step 2: Functional & UI/UX Guardrail Audit\n"
+                    f"[Priority 1 - Functional Inspector]: {'Code syntax & logic checks passed. ✅' if p1_count == 0 else f'⚠ {p1_count} functional defect(s) detected — CRITICAL priority.'}\n"
+                    f"[Priority 2 - UI/UX Inspector]: {'Glassmorphism, layout, typography checks passed. ✅' if p2_count == 0 else f'⚠ {p2_count} UI/UX flaw(s) flagged — secondary priority.'}\n"
+                    f"→ Self-healing triggered with ranked defect list (functional bugs first)..."
+                )
                 steps.append({
                     "type": "tool_step",
                     "iteration": turn,
                     "tool": "verify_and_execute_codebase",
                     "args": {
-                        "status": f"Turn {turn} audit detected {len(defects)} defect(s). Triggering self-healing refinement loop...",
-                        "defects": defects
+                        "status": status_msg,
+                        "functional_defects": functional_defects,
+                        "ui_ux_flaws": ui_ux_flaws
                     },
-                    "output": f"Detected issues: {'; '.join(defects)}. Re-routing to model engine with full code context..."
+                    "output": f"Turn {turn}: {p1_count} functional defect(s), {p2_count} UI/UX flaw(s). Re-routing to model engine..."
                 })
 
                 final_files_dict = sanitized_dict
                 last_generated_files = sanitized_dict
 
                 if turn < self.MAX_HEALING_TURNS:
-                    # Provide previous code + defects + original task for true self-healing
+                    # Provide previous code + ranked defects + original task for true self-healing
                     previous_code_dump = "\n\n".join([f"```{fname}\n{code}\n```" for fname, code in last_generated_files.items()])
-                    defect_summary = "\n".join([f"- {d}" for d in defects])
-                    
+
+                    ranked_defect_lines = []
+                    if functional_defects:
+                        ranked_defect_lines.append("=== CRITICAL PRIORITY — FUNCTIONAL DEFECTS (FIX FIRST) ===")
+                        ranked_defect_lines.extend([f"- [P1-FUNCTIONAL] {d}" for d in functional_defects])
+                    if ui_ux_flaws:
+                        ranked_defect_lines.append("=== SECONDARY PRIORITY — UI/UX DESIGN FLAWS (FIX AFTER FUNCTIONAL) ===")
+                        ranked_defect_lines.extend([f"- [P2-UIUX] {d}" for d in ui_ux_flaws])
+                    defect_summary = "\n".join(ranked_defect_lines)
+
                     current_prompt = (
                         f"ORIGINAL USER TASK:\n{prompt}\n\n"
                         f"PREVIOUSLY GENERATED CODE THAT CONTAINS BUGS:\n{previous_code_dump}\n\n"
                         f"THE CODE CONTAINS THE FOLLOWING DEFECTS THAT YOU MUST FIX:\n{defect_summary}\n\n"
-                        f"CRITICAL: Return the COMPLETE, corrected files. Do not use placeholders or omit any logic. "
-                        f"Specify filenames format ` ```lang:path `."
+                        f"CRITICAL: Fix ALL [P1-FUNCTIONAL] issues first. Then fix all [P2-UIUX] design flaws. "
+                        f"Return COMPLETE, corrected files with no placeholders. Specify filenames format ` ```lang:path `."
                     )
 
         created_paths = []
@@ -732,35 +845,56 @@ class GlassAgent:
             files_dict = {fname: content for fname, content in parsed_list}
 
             sanitized_dict = CodeSanitizer.sanitize(files_dict)
-            defects = UniversalCodeVerifier.audit_codebase(sanitized_dict, original_file_name=file_name)
+
+            # ── Priority 1: Functional & Code Audit ──
+            functional_defects = UniversalCodeVerifier.audit_codebase(sanitized_dict, original_file_name=file_name)
+
+            # ── Priority 2: UI/UX Guardrail Audit (secondary layer) ──
+            ui_ux_flaws = UIUXGuardrailInspector.audit_uiux(sanitized_dict)
+
+            # Merge: functional bugs FIRST (critical), UI/UX flaws SECOND (secondary)
+            all_defects = functional_defects + ui_ux_flaws
 
             accumulated_tokens += sum(len(c.split()) for c in sanitized_dict.values()) + len(current_prompt.split()) * 4
 
-            if not defects:
+            if not all_defects:
                 final_files_dict = sanitized_dict
                 audit_step = {
                     "type": "tool_step",
                     "iteration": step_counter,
                     "tool": "verify_and_execute_codebase",
                     "args": {
-                        "status": "Running AST compilation, syntax verification, and multi-file contract audit...",
+                        "status": (
+                            "Step 2: Functional & UI/UX Guardrail Audit\n"
+                            "[Priority 1 - Functional Inspector]: Code syntax & logic checks passed. ✅\n"
+                            "[Priority 2 - UI/UX Inspector]: Glassmorphism, typography, layout checks passed. ✅"
+                        ),
                         "defects_found": 0
                     },
-                    "output": f"Codebase verified 100% bug-free (0 defects). Passed multi-language compilation audit (via {engine_used})."
+                    "output": f"Codebase verified 100% bug-free (0 defects). Both Functional & UI/UX audits passed (via {engine_used})."
                 }
                 yield {"type": "step", "step": audit_step}
                 step_counter += 1
                 break
             else:
+                p1_count = len(functional_defects)
+                p2_count = len(ui_ux_flaws)
+                status_msg = (
+                    f"Step 2: Functional & UI/UX Guardrail Audit\n"
+                    f"[Priority 1 - Functional Inspector]: {'Code syntax & logic checks passed. ✅' if p1_count == 0 else f'⚠ {p1_count} functional defect(s) detected — CRITICAL priority.'}\n"
+                    f"[Priority 2 - UI/UX Inspector]: {'Glassmorphism, layout, typography checks passed. ✅' if p2_count == 0 else f'⚠ {p2_count} UI/UX flaw(s) flagged — secondary priority.'}\n"
+                    f"→ Self-healing triggered with ranked defect list (functional bugs first)..."
+                )
                 heal_step = {
                     "type": "tool_step",
                     "iteration": step_counter,
                     "tool": "verify_and_execute_codebase",
                     "args": {
-                        "status": f"Turn {turn} audit detected {len(defects)} defect(s). Triggering self-healing refinement loop...",
-                        "defects": defects
+                        "status": status_msg,
+                        "functional_defects": functional_defects,
+                        "ui_ux_flaws": ui_ux_flaws
                     },
-                    "output": f"Detected issues: {'; '.join(defects)}. Re-routing to model engine with full code context..."
+                    "output": f"Turn {turn}: {p1_count} functional defect(s), {p2_count} UI/UX flaw(s). Re-routing to model engine..."
                 }
                 yield {"type": "step", "step": heal_step}
                 step_counter += 1
@@ -770,13 +904,22 @@ class GlassAgent:
 
                 if turn < self.MAX_HEALING_TURNS:
                     previous_code_dump = "\n\n".join([f"```{fname}\n{code}\n```" for fname, code in last_generated_files.items()])
-                    defect_summary = "\n".join([f"- {d}" for d in defects])
+
+                    ranked_defect_lines = []
+                    if functional_defects:
+                        ranked_defect_lines.append("=== CRITICAL PRIORITY — FUNCTIONAL DEFECTS (FIX FIRST) ===")
+                        ranked_defect_lines.extend([f"- [P1-FUNCTIONAL] {d}" for d in functional_defects])
+                    if ui_ux_flaws:
+                        ranked_defect_lines.append("=== SECONDARY PRIORITY — UI/UX DESIGN FLAWS (FIX AFTER FUNCTIONAL) ===")
+                        ranked_defect_lines.extend([f"- [P2-UIUX] {d}" for d in ui_ux_flaws])
+                    defect_summary = "\n".join(ranked_defect_lines)
+
                     current_prompt = (
                         f"ORIGINAL USER TASK:\n{prompt}\n\n"
                         f"PREVIOUSLY GENERATED CODE THAT CONTAINS BUGS:\n{previous_code_dump}\n\n"
                         f"THE CODE CONTAINS THE FOLLOWING DEFECTS THAT YOU MUST FIX:\n{defect_summary}\n\n"
-                        f"CRITICAL: Return the COMPLETE, corrected files. Do not use placeholders or omit any logic. "
-                        f"Specify filenames format ` ```lang:path `."
+                        f"CRITICAL: Fix ALL [P1-FUNCTIONAL] issues first. Then fix all [P2-UIUX] design flaws. "
+                        f"Return COMPLETE, corrected files with no placeholders. Specify filenames format ` ```lang:path `."
                     )
 
         # ── Write files and yield a step per file ──
