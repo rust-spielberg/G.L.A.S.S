@@ -80,3 +80,6 @@ def download_workspace(session_id: str):
         filename=f"glass_workspace_{session_id}.zip",
         media_type="application/zip"
     )
+@app.get("/")
+def health_check():
+    return {"status": "ok", "message": "G.L.A.S.S. backend service is live"}
