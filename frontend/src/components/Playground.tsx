@@ -384,6 +384,8 @@ export function Playground() {
   const [prompt, setPrompt] = useState("");
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [hasStartedStreaming, setHasStartedStreaming] = useState(false);
+  const streamTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tokens, setTokens] = useState(0);
   const [steps, setSteps] = useState<any[]>([]);
   const [files, setFiles] = useState<string[]>([]);
@@ -434,7 +436,14 @@ export function Playground() {
       return freshId;
     })() : sessionId;
 
+    if (streamTimerRef.current) clearTimeout(streamTimerRef.current);
     setLoading(true);
+    setHasStartedStreaming(false);
+
+    // Keep the main central loading orb state visible for at least 5000ms
+    streamTimerRef.current = setTimeout(() => {
+      setHasStartedStreaming(true);
+    }, 5000);
     
     const initialTool = attachedFile ? "analyze_codebase" : (steps.length > 0 ? "update_codebase" : "synthesize_codebase");
     const initialStatus = attachedFile 
@@ -542,10 +551,12 @@ export function Playground() {
   };
 
   const handleReset = () => {
+    if (streamTimerRef.current) clearTimeout(streamTimerRef.current);
     setSessionId(`session_${Date.now()}`);
     setPrompt("");
     setAttachedFile(null);
     setLoading(false);
+    setHasStartedStreaming(false);
     setSteps([]);
     setFiles([]);
     setActiveFile("");
@@ -697,7 +708,7 @@ export function Playground() {
         </div>
 
         <div className="flex items-center space-x-4">
-          {(files.length > 0 || steps.length > 0) && (
+          {(hasStartedStreaming || files.length > 0 || steps.length > 0) && (
             <button
               onClick={handleReset}
               className="flex items-center space-x-1 text-xs text-zinc-400 hover:text-white px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 transition-all"
@@ -717,8 +728,8 @@ export function Playground() {
 
       {/* MAIN WORKSPACE VIEW */}
       <main className="flex-1 flex overflow-hidden z-10 p-6 gap-6 min-h-0">
-        {steps.length === 0 ? (
-          /* IDLE STATE: CENTERED PROMPT PILL WITH HERO ORB */
+        {!hasStartedStreaming ? (
+          /* IDLE / CENTRAL LOADING STATE: CENTERED PROMPT PILL WITH HERO ORB */
           <div className="flex-1 flex flex-col items-center justify-center max-w-2xl mx-auto w-full text-center">
             <h1 className="text-2xl font-bold tracking-tight text-white mb-1">G.L.A.S.S. Synthesis Engine</h1>
             <p className="text-sm text-zinc-400 mb-6">Describe what software, API endpoint, or script you want G.L.A.S.S. to build.</p>
@@ -748,17 +759,10 @@ export function Playground() {
             
             {/* LEFT COLUMN: EXECUTION LOG & BOTTOM PROMPT BAR */}
             <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden">
-              
-              {/* SYNTHESIZING HERO ORB OR LOGS */}
-              {loading && steps.length === 1 ? (
-                <div className="flex-1 flex items-center justify-center bg-zinc-950/70 border border-white/10 rounded-2xl">
-                  <HeroOrb />
-                </div>
-              ) : (
-                <div 
-                  ref={logContainerRef}
-                  className="w-full flex-1 min-h-0 max-h-[calc(100vh-220px)] bg-zinc-950/70 border border-white/10 rounded-2xl p-4 flex flex-col gap-4 overflow-y-auto shadow-2xl custom-scrollbar"
-                >
+              <div 
+                ref={logContainerRef}
+                className="w-full flex-1 min-h-0 max-h-[calc(100vh-220px)] bg-zinc-950/70 border border-white/10 rounded-2xl p-4 flex flex-col gap-4 overflow-y-auto shadow-2xl custom-scrollbar"
+              >
                   <div className="text-xs font-semibold text-zinc-400 tracking-wider uppercase flex items-center justify-between shrink-0 sticky top-0 bg-zinc-950/90 py-1 z-10">
                     <span>Execution Log</span>
                     {loading && <span className="text-purple-400 animate-pulse">Synthesizing Codebase...</span>}
@@ -790,7 +794,6 @@ export function Playground() {
                     </div>
                   ))}
                 </div>
-              )}
 
               {/* DOCKED BOTTOM PROMPT BAR FOR ITERATIONS */}
               <div className="w-full shrink-0">
