@@ -9,18 +9,28 @@ from agent import GlassAgent, WORKSPACES_DIR
 
 app = FastAPI(title="G.L.A.S.S. API")
 
-# FIX CORS FOR SAFARI & WEBKIT
+# =============================================================================
+# ZERO-FRICTION FAIL-SAFE CORS MIDDLEWARE CONFIGURATION
+# =============================================================================
+# 1. Dynamic Parsing: Extract CORS_ORIGINS from env or default to wildcard "*"
+raw_origins = os.getenv("CORS_ORIGINS", "*").strip()
+
+if not raw_origins or raw_origins == "*":
+    origins = ["*"]
+else:
+    # Strip whitespace, filter empty strings, and deduplicate preserving order
+    origins = list(dict.fromkeys(o.strip() for o in raw_origins.split(",") if o.strip()))
+
+# 2. W3C Compliance: Browsers strictly reject allow_credentials=True when allow_origins=["*"]
+is_wildcard = "*" in origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
-    allow_credentials=True,
+    allow_origins=origins,
+    allow_credentials=not is_wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 @app.post("/api/agent/run")
