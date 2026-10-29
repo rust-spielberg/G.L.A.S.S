@@ -13,8 +13,9 @@ app = FastAPI(title="G.L.A.S.S. API")
 # 1. Trust Render reverse proxy headers (Prevents HTTPS protocol drops)
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 
-# 2. Explicit CORS configuration
+# 2. Explicit CORS configuration (Vercel + Netlify + Localhost)
 ALLOWED_ORIGINS = [
+    "https://g-l-a-s-s.vercel.app",
     "https://glass-ai-agent.netlify.app",
     "http://localhost:5173",
     "http://localhost:3000",
@@ -32,8 +33,8 @@ if raw_origins:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=False,  # Set False so browser never rejects wildcard or dynamic origin headers
-    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
+    allow_origin_regex=r"https?://.*",
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
