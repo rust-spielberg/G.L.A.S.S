@@ -17,7 +17,8 @@ The entry point of G.L.A.S.S. features a high-aesthetic dark glassmorphism porta
 ![Home Page](./1st.png)
 
 ### 2. Primary Workspace (Playground #1)
-The primary prompt intake canvas where developers specify application architecture, feature sets, layout choices, and framework requirements. Designed for high-clarity prompt entry before initiating the background agent pipeline.
+The primary prompt intake canvas where developers specify application architecture, feature sets, layout choices, and framework requirements. Designed for high-clarity prompt entry before initiating the background agent-pipeline.
+
 ![Workspace Playground 1](./2nd.png)
 
 ### 3. Mind Orb Loading State (Enforced 5s UI/UX Feedback State)
