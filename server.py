@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Form, File, UploadFile, HTTPException
+from fastapi import FastAPI, Form, File, UploadFile, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from typing import Optional
@@ -11,45 +11,73 @@ from agent import GlassAgent, WORKSPACES_DIR
 app = FastAPI(title="G.L.A.S.S. API")
 
 # =============================================================================
-# ZERO-FRICTION FAIL-SAFE CORS MIDDLEWARE CONFIGURATION
+# PRODUCTION CORS & PREFLIGHT CONFIGURATION (Netlify + Localhost)
 # =============================================================================
-# 1. Dynamic Parsing: Extract CORS_ORIGINS from env or default to wildcard "*"
-raw_origins = os.getenv("CORS_ORIGINS", "*").strip()
+ALLOWED_ORIGINS = [
+    "https://glass-ai-agent.netlify.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
 
-if not raw_origins or raw_origins == "*":
-    origins = ["*"]
-else:
-    # Strip whitespace, filter empty strings, and deduplicate preserving order
-    origins = list(dict.fromkeys(o.strip() for o in raw_origins.split(",") if o.strip()))
-
-# 2. W3C Compliance: Browsers strictly reject allow_credentials=True when allow_origins=["*"]
-is_wildcard = "*" in origins
+raw_origins = os.getenv("CORS_ORIGINS", "").strip()
+if raw_origins and raw_origins != "*":
+    for o in raw_origins.split(","):
+        clean = o.strip()
+        if clean and clean not in ALLOWED_ORIGINS:
+            ALLOWED_ORIGINS.append(clean)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=not is_wildcard,
-    allow_methods=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https?://.*",
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE", "PATCH"],
     allow_headers=["*"],
     expose_headers=["*"],
 )
 
+# Explicit OPTIONS preflight handler (Express equivalent: app.options('*', cors()))
+@app.options("/{rest_of_path:path}")
+async def preflight_catchall(rest_of_path: str):
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "https://glass-ai-agent.netlify.app",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE, PATCH",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
 @app.post("/api/agent/run")
-async def run_agent(
-    prompt: str = Form(...),
-    session_id: str = Form("default_session"),
-    file: Optional[UploadFile] = File(None)
-):
-    agent = GlassAgent(session_id=session_id)
+async def run_agent(request: Request):
+    content_type = request.headers.get("content-type", "")
+    prompt = ""
+    session_id = "default_session"
     file_name = None
     file_content = None
 
-    if file:
-        file_name = file.filename
-        content_bytes = await file.read()
-        file_content = content_bytes.decode("utf-8", errors="ignore")
+    if "application/json" in content_type:
+        body = await request.json()
+        prompt = body.get("prompt", "")
+        session_id = body.get("session_id", "default_session")
+    else:
+        form = await request.form()
+        prompt = form.get("prompt", "")
+        session_id = form.get("session_id", "default_session")
+        uploaded = form.get("file")
+        if uploaded and hasattr(uploaded, "filename") and uploaded.filename:
+            file_name = uploaded.filename
+            content_bytes = await uploaded.read()
+            file_content = content_bytes.decode("utf-8", errors="ignore")
+
+    agent = GlassAgent(session_id=session_id)
 
     def event_stream():
+        # Immediate ping to establish HTTP 200 and prevent cold-start proxy timeouts
+        yield json.dumps({"type": "ping"}) + "\n"
         try:
             for event in agent.execute_stream(prompt=prompt, file_name=file_name, file_content=file_content):
                 yield json.dumps(event) + "\n"
