@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Flappy Bird Clone</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="gameCanvas" width="480" height="640" tabindex="0"></canvas>
+
+  <div id="hud">
+    <div id="score">Score: 0</div>
+    <div id="highScore">High: 0</div>
+  </div>
+
+  <div id="gameOverModal" class="hidden">
+    <div class="modal-content">
+      <p id="finalScore">Score: 0</p>
+      <button id="restartBtn">Restart</button>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

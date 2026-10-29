@@ -13,7 +13,8 @@ import {
   RotateCcw,
   Paperclip,
   X,
-  FileText
+  FileText,
+  Play
 } from 'lucide-react';
 
 // DYNAMIC BACKEND API BASE URL (Allows smooth transition between Localhost & Render)
@@ -389,6 +390,9 @@ export function Playground() {
   const [activeFile, setActiveFile] = useState<string>("");
   const [fileContent, setFileContent] = useState<string>("");
   const [synthesisMode, setSynthesisMode] = useState<"edit" | "new">("new");
+  const [showPreview, setShowPreview] = useState<boolean>(false);
+  const [previewKey, setPreviewKey] = useState<number>(0);
+  const [filesCache, setFilesCache] = useState<Record<string, string>>({});
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const logContainerRef = useRef<HTMLDivElement | null>(null);
@@ -490,10 +494,11 @@ export function Playground() {
       if (createdFiles.length > 0) {
         setFiles(createdFiles);
         setSynthesisMode("edit"); // Auto-switch to Edit mode once files exist
+        await ensureWorkspaceFilesLoaded(createdFiles, activeSessionId ?? sessionId, true);
         if (!activeFile || !createdFiles.includes(activeFile)) {
-          selectFile(createdFiles[0]);
+          selectFile(createdFiles[0], true);
         } else {
-          selectFile(activeFile);
+          selectFile(activeFile, true);
         }
       }
     } catch (err: any) {
@@ -522,18 +527,129 @@ export function Playground() {
     setFileContent("");
     setTokens(0);
     setSynthesisMode("new");
+    setShowPreview(false);
+    setPreviewKey(0);
+    setFilesCache({});
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const selectFile = async (filename: string) => {
+  const selectFile = async (filename: string, bypassCache: boolean = false) => {
     setActiveFile(filename);
+    if (!bypassCache && filesCache[filename]) {
+      setFileContent(filesCache[filename]);
+      return;
+    }
     try {
-      const res = await fetch(`${API_BASE_URL}/api/workspace/file/${filename}?session_id=${sessionId}`);
+      const res = await fetch(`${API_BASE_URL}/api/workspace/file/${filename}?session_id=${sessionId}&t=${Date.now()}`);
       const data = await res.json();
-      setFileContent(data.content || "");
+      const content = data.content || "";
+      setFileContent(content);
+      setFilesCache(prev => ({ ...prev, [filename]: content }));
     } catch {
       setFileContent("# Error loading file content.");
     }
+  };
+
+  const ensureWorkspaceFilesLoaded = async (
+    targetFiles: string[] = files, 
+    currentSessionId: string = sessionId,
+    forceRefresh: boolean = false
+  ) => {
+    const webFiles = targetFiles.filter(f => f.endsWith('.html') || f.endsWith('.css') || f.endsWith('.js'));
+    const toFetch = forceRefresh ? webFiles : webFiles.filter(f => !filesCache[f]);
+    if (toFetch.length === 0) return;
+    const newEntries: Record<string, string> = {};
+    await Promise.all(
+      toFetch.map(async (filename) => {
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/workspace/file/${filename}?session_id=${currentSessionId}&t=${Date.now()}`);
+          const data = await res.json();
+          newEntries[filename] = data.content || "";
+        } catch {
+          newEntries[filename] = "";
+        }
+      })
+    );
+    setFilesCache(prev => ({ ...prev, ...newEntries }));
+    if (forceRefresh) {
+      setPreviewKey(prev => prev + 1);
+    }
+  };
+
+  const buildPreviewDoc = () => {
+    const htmlFile = files.find(f => f.endsWith('.html'));
+    let html = htmlFile && filesCache[htmlFile]
+      ? filesCache[htmlFile]
+      : '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Live Preview</title></head><body><div id="app"></div></body></html>';
+
+    // 1. Bundle CSS with failsafe HUD overlay pointer-events rules
+    const cssFiles = files.filter(f => f.endsWith('.css'));
+    let combinedCss = `
+      /* Canvas Layering & HUD Overlay Fix */
+      .hud-overlay { pointer-events: none !important; }
+      .hud-overlay button, .modal-content, button, input, select { pointer-events: auto !important; }
+    `;
+    for (const cf of cssFiles) {
+      if (filesCache[cf]) combinedCss += `\n/* ${cf} */\n` + filesCache[cf];
+    }
+    const styleTag = `<style>\n${combinedCss}\n</style>`;
+    const domReadyShim = `<script>
+      (function() {
+        var origAdd = EventTarget.prototype.addEventListener;
+        EventTarget.prototype.addEventListener = function(type, listener, options) {
+          if (type === 'DOMContentLoaded' && (document.readyState === 'complete' || document.readyState === 'interactive')) {
+            setTimeout(listener, 1);
+            return;
+          }
+          return origAdd.call(this, type, listener, options);
+        };
+      })();
+    </script>`;
+
+    // Strip external <link rel="stylesheet"> referencing workspace CSS
+    html = html.replace(/<link\s+[^>]*rel=["']stylesheet["'][^>]*>/gi, (match) => {
+      const hrefMatch = match.match(/href=["']([^"']+)["']/i);
+      if (hrefMatch) {
+        const href = hrefMatch[1].replace(/^\.\//, '').split('/').pop();
+        if (cssFiles.some(cf => cf.endsWith(href || ''))) return '';
+      }
+      return match;
+    });
+
+    if (html.includes('</head>')) {
+      html = html.replace('</head>', `${styleTag}\n${domReadyShim}\n</head>`);
+    } else {
+      html = styleTag + '\n' + domReadyShim + '\n' + html;
+    }
+
+    // 2. Bundle JS files
+    const jsFiles = files.filter(f => f.endsWith('.js'));
+    const inlinedJsFiles = new Set<string>();
+
+    html = html.replace(/<script\s+[^>]*src=["']([^"']+)["'][^>]*>\s*<\/script>/gi, (match, src) => {
+      const cleanSrc = src.replace(/^\.\//, '').split('/').pop();
+      const matchedJs = jsFiles.find(jf => jf.endsWith(cleanSrc));
+      if (matchedJs && filesCache[matchedJs]) {
+        inlinedJsFiles.add(matchedJs);
+        return `<script>\n/* Inlined ${matchedJs} */\n${filesCache[matchedJs]}\n</script>`;
+      }
+      return match;
+    });
+
+    let remainingJs = '';
+    for (const jf of jsFiles) {
+      if (!inlinedJsFiles.has(jf) && filesCache[jf]) {
+        remainingJs += `<script>\n/* Inlined ${jf} */\n${filesCache[jf]}\n</script>\n`;
+      }
+    }
+
+    if (remainingJs) {
+      html = html.includes('</body>') 
+        ? html.replace('</body>', `${remainingJs}\n</body>`) 
+        : html + '\n' + remainingJs;
+    }
+
+    return html;
   };
 
   const placeholderText = attachedFile
@@ -694,14 +810,75 @@ export function Playground() {
                     ))}
                   </div>
 
-                  <WorkspaceActions sessionId={sessionId} />
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => {
+                        const next = !showPreview;
+                        setShowPreview(next);
+                        if (next) ensureWorkspaceFilesLoaded();
+                      }}
+                      className={`flex items-center space-x-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all active:scale-95 ${
+                        showPreview
+                          ? 'bg-purple-600/30 border border-purple-500/40 text-purple-200'
+                          : 'bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300'
+                      }`}
+                    >
+                      {showPreview ? <Code2 className="w-3.5 h-3.5 text-purple-400" /> : <Play className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />}
+                      <span>{showPreview ? "View Code" : "Run Preview"}</span>
+                    </button>
+                    <WorkspaceActions sessionId={sessionId} />
+                  </div>
                 </div>
 
-                <div className="flex-1 p-4 overflow-auto bg-black/60 min-h-0 custom-scrollbar">
-                  <pre className="text-xs font-mono text-zinc-200 leading-relaxed whitespace-pre">
-                    {fileContent}
-                  </pre>
-                </div>
+                {showPreview ? (
+                  <div className="flex-1 flex flex-col bg-zinc-950 min-h-0 overflow-hidden relative">
+                    {/* Live Preview Loading Overlay during synthesis / edit */}
+                    {loading && (
+                      <div className="absolute inset-0 z-30 bg-black/75 backdrop-blur-md flex flex-col items-center justify-center gap-3">
+                        <div className="relative">
+                          <div className="w-10 h-10 rounded-full border-2 border-purple-500/20 border-t-purple-400 animate-spin" />
+                          <Sparkles className="w-4 h-4 text-purple-300 absolute inset-0 m-auto animate-pulse" />
+                        </div>
+                        <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-purple-950/70 border border-purple-500/30 text-purple-200 text-xs font-mono shadow-xl animate-pulse">
+                          <span>⚡ Re-Synthesizing Sandbox Code...</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="h-9 px-4 bg-zinc-900/90 border-b border-white/10 flex items-center justify-between text-xs shrink-0">
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                        <span className="font-semibold text-zinc-200 shrink-0">Live Sandbox Preview</span>
+                        {files.some(f => f.endsWith('.cpp') || f.endsWith('.py')) && (
+                          <span className="ml-2 px-2.5 py-0.5 rounded text-[10px] bg-amber-500/10 border border-amber-500/30 text-amber-300 font-mono truncate">
+                            [INFO] Frontend UI Previewing Live. Backend (C++/Python) requires local compilation.
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setPreviewKey(k => k + 1)}
+                        title="Restart Preview"
+                        className="flex items-center gap-1 px-2.5 py-1 rounded bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white transition-all text-xs shrink-0 ml-2"
+                      >
+                        <RotateCcw className="w-3 h-3 text-purple-400" />
+                        <span>Restart</span>
+                      </button>
+                    </div>
+                    <iframe
+                      key={previewKey}
+                      srcDoc={buildPreviewDoc()}
+                      sandbox="allow-scripts allow-same-origin allow-modals allow-forms allow-popups"
+                      title="Live Preview Sandbox"
+                      className="w-full flex-1 border-0 bg-white"
+                    />
+                  </div>
+                ) : (
+                  <div className="flex-1 p-4 overflow-auto bg-black/60 min-h-0 custom-scrollbar">
+                    <pre className="text-xs font-mono text-zinc-200 leading-relaxed whitespace-pre">
+                      {fileContent}
+                    </pre>
+                  </div>
+                )}
               </div>
             )}
 

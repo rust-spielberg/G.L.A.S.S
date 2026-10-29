@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Retro Flappy Bird</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="gameCanvas" width="400" height="600"></canvas>
+<div id="hud">
+  <div id="score">Score: 0</div>
+  <div id="highScore">High: 0</div>
+</div>
+<div id="gameOverModal" class="hidden">
+  <h1>GAME OVER</h1>
+  <p id="finalScore">Score: 0</p>
+  <button id="restartBtn">Try Again</button>
+</div>
+<script src="game.js"></script>
+</body>
+</html>

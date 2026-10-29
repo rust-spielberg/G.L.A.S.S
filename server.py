@@ -43,7 +43,10 @@ def run_agent(
         return result
     except Exception as e:
         print(f"[Server Execution Error]: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        err_str = str(e)
+        if "All AI inference endpoints are currently unreachable" in err_str:
+            raise HTTPException(status_code=503, detail="[ERROR] All AI inference endpoints are currently unreachable. Please check environment configuration or provider API keys.")
+        raise HTTPException(status_code=500, detail=err_str)
 
 @app.get("/api/workspace/file/{filename:path}")
 def read_workspace_file(filename: str, session_id: str = "default_session"):

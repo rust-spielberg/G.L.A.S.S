@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Cyberpunk Synthwave Runner</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+
+    <div id="hud">
+        <div id="score">Distance: 0m</div>
+        <div id="multiplier">Multiplier: x1</div>
+        <div id="highScore">High Score: 0m</div>
+    </div>
+
+    <div id="gameOverModal" class="hidden">
+        <div class="modalContent">
+            <h2>System Failure</h2>
+            <p id="finalScore">You traveled 0m</p>
+            <button id="restartBtn">Reboot System</button>
+        </div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>

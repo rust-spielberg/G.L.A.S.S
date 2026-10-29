@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>3D Solar System Orbiter</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="three.min.js"></script>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>
+
+    <div id="hudOverlay">
+        <h1>3D SOLAR SYSTEM ORBITER</h1>
+        <label for="speedSlider">Speed:</label>
+        <input type="range" id="speedSlider" min="0.1" max="5" step="0.1" value="1">
+        <button id="resetCamBtn">Reset Camera</button>
+        <div id="planetInfo">Click a planet</div>
+    </div>
+
+    <script src="space.js"></script>
+</body>
+</html>

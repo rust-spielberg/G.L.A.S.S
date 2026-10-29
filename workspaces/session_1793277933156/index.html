@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Anti‑Design Hacker Terminal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="dark">
+<header class="header">
+  <div id="clock" class="status">00:00:00</div>
+  <button id="themeBtn" class="btn">🌓</button>
+  <button id="soundBtn" class="btn">🔊</button>
+</header>
+<main class="layout">
+  <section id="terminal" class="panel">
+    <div id="cliOutput" class="output"></div>
+    <div class="input-line">
+      <span class="prompt">></span>
+      <input id="cliInput" type="text" autocomplete="off" spellcheck="false" />
+    </div>
+  </section>
+  <section id="projectGrid" class="panel grid">
+    <div class="card" data-name="NeonPulse">
+      <h3>NeonPulse</h3>
+      <p>WebGL synth visualizer.</p>
+    </div>
+    <div class="card" data-name="GlitchCMS">
+      <h3>GlitchCMS</h3>
+      <p>Static site generator.</p>
+    </div>
+    <div class="card" data-name="CipherChat">
+      <h3>CipherChat</h3>
+      <p>End‑to‑end encrypted messenger.</p>
+    </div>
+  </section>
+</main>
+<div id="modalOverlay" class="modal hidden">
+  <div class="modal-content">
+    <h2>Contact</h2>
+    <p>Email: <a href="mailto:hacker@darknet.io">hacker@darknet.io</a></p>
+    <p>GitHub: <a href="https://github.com/hacker" target="_blank">github.com/hacker</a></p>
+    <button id="closeModal" class="btn">Close</button>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

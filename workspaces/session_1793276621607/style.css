@@ -1,0 +1,13 @@
+body,html{margin:0;padding:0;height:100%;overflow:hidden;background:#000;font-family:sans-serif;color:#fff}
+#hudOverlay{
+  position:absolute;top:10px;left:10px;padding:15px;
+  background:rgba(20,20,30,0.6);border-radius:10px;backdrop-filter:blur(8px);
+  pointer-events:none;color:#e0e0ff;font-size:14px;
+}
+#hudOverlay h1{margin:0 0 10px;font-size:18px}
+#hudOverlay label,#hudOverlay button,#hudOverlay #planetInfo{
+  display:block;margin-top:8px;pointer-events:auto;
+}
+#hudOverlay input{width:150px}
+#hudOverlay button{padding:4px 8px;background:#444;color:#fff;border:none;border-radius:4px;cursor:pointer}
+#hudOverlay button:hover{background:#555}

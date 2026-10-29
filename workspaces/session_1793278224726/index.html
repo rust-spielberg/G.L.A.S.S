@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Studio Atelier</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="nav-header">
+        <div class="brand">STUDIO ATELIER</div>
+        <nav>
+            <a href="#portfolioSection" class="nav-link">Portfolio</a>
+            <a href="#estimatorSection" class="nav-link">Price Estimator</a>
+            <a href="#bookingForm" class="nav-link">Book Consultation</a>
+        </nav>
+    </header>
+
+    <section class="hero">
+        <h1>Sculpting Quiet Spaces</h1>
+        <p>Refined interiors that breathe serenity.</p>
+        <button id="heroBtn">Get Your Estimate</button>
+    </section>
+
+    <section id="portfolioSection" class="section">
+        <h2>Portfolio</h2>
+        <div class="filter-tabs">
+            <button class="filter-btn active" data-filter="all">All</button>
+            <button class="filter-btn" data-filter="living">Living</button>
+            <button class="filter-btn" data-filter="kitchen">Kitchen</button>
+            <button class="filter-btn" data-filter="office">Office</button>
+        </div>
+        <div class="grid">
+            <div class="card" data-category="living">
+                <h3>Modern Living Room</h3>
+                <p>Soft tones, natural light.</p>
+            </div>
+            <div class="card" data-category="kitchen">
+                <h3>Minimalist Kitchen</h3>
+                <p>Seamless marble surfaces.</p>
+            </div>
+            <div class="card" data-category="office">
+                <h3>Creative Office</h3>
+                <p>Open plan, ergonomic design.</p>
+            </div>
+            <div class="card" data-category="living">
+                <h3>Cozy Lounge</h3>
+                <p>Warm textures, subtle lighting.</p>
+            </div>
+        </div>
+    </section>
+
+    <section id="estimatorSection" class="section">
+        <h2>Price Estimator</h2>
+        <div class="estimator-controls">
+            <label>
+                Room Area (sq ft):
+                <input type="range" id="areaSlider" min="100" max="2000" step="10" value="500">
+                <span id="areaValue">500</span> ft²
+            </label>
+            <label>
+                Material:
+                <select id="materialSelect">
+                    <option value="oak">Oak</option>
+                    <option value="marble">Marble</option>
+                    <option value="microcement">Microcement</option>
+                </select>
+            </label>
+            <fieldset>
+                <legend>Project Scope</legend>
+                <label><input type="radio" name="scope" value="full" checked> Full Renovation</label>
+                <label><input type="radio" name="scope" value="styling"> Interior Styling</label>
+            </fieldset>
+        </div>
+        <div class="estimate-output">
+            <span>Total Estimate:</span>
+            <strong id="totalEstimate">$0</strong>
+        </div>
+    </section>
+
+    <section id="bookingForm" class="section">
+        <h2>Book Consultation</h2>
+        <form id="consultForm">
+            <label>Name: <input type="text" name="name" required></label>
+            <label>Phone: <input type="tel" name="phone" required></label>
+            <label>Email: <input type="email" name="email" required></label>
+            <label>Preferred Date: <input type="date" name="date" required></label>
+            <button type="submit">Book Consultation</button>
+        </form>
+        <div id="confirmationContainer"></div>
+    </section>
+
+    <script src="app.js"></script>
+</body>
+</html>

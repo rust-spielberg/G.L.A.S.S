@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Retro Pong</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="gameCanvas" width="700" height="450"></canvas>
+<div id="hud">
+  <span id="playerScore">0</span> : <span id="aiScore">0</span>
+</div>
+<div id="gameOverModal" class="hidden">
+  <div id="gameOverMessage"></div>
+  <button id="restartBtn">Play Again</button>
+</div>
+<script src="game.js"></script>
+</body>
+</html>

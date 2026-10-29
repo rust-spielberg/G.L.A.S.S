@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from dotenv import load_dotenv
 from openai import OpenAI
+from config import MODEL_CHAIN, PRIMARY_MODEL, LOCAL_MODEL, NEBIUS_BASE_URL, NVIDIA_BASE_URL, OLLAMA_BASE_URL, logger
 
 load_dotenv()
 
@@ -220,19 +221,7 @@ class UniversalCodeVerifier:
                             f"with pointer-events: auto re-enabled on interactive buttons, or canvas clicks will be blocked."
                         )
 
-        # 6. DOMContentLoaded safety check for JS files
-        for filename, content in files_map.items():
-            if filename.endswith(".js"):
-                has_dom_queries = bool(re.search(r'(?:document\.getElementById|document\.querySelector|document\.getElementsBy)', content))
-                has_dom_guard = bool(re.search(r'(?:DOMContentLoaded|window\.onload|window\.addEventListener\s*\(\s*["\']load)', content))
-                if has_dom_queries and not has_dom_guard:
-                    defects.append(
-                        f"DOM Safety Error in '{filename}': DOM queries (getElementById/querySelector) are called without "
-                        f"a DOMContentLoaded or window.onload guard. If the script runs before HTML is parsed, all "
-                        f"event listeners will silently fail and buttons will be completely unclickable."
-                    )
-
-        # 7. Web Audio API timeline collision check for JS/HTML
+        # 6. Web Audio API timeline collision check for JS/HTML
         for filename, content in files_map.items():
             if filename.endswith((".js", ".html")):
                 if "linearRampToValueAtTime" in content or "exponentialRampToValueAtTime" in content:
@@ -277,6 +266,12 @@ class CodeSanitizer:
                     content
                 )
                 files_map[fname] = sanitized_content
+
+        # Auto-inject Canvas & HUD Layering defaults into CSS
+        for fname, content in files_map.items():
+            if fname.endswith(".css"):
+                if ("hud" in content.lower() or "overlay" in content.lower() or "modal" in content.lower()) and "pointer-events" not in content:
+                    files_map[fname] = content + "\n\n/* Canvas & HUD Layering Failsafe */\n.hud-overlay { pointer-events: none; }\n.hud-overlay button, .modal-content, button, input { pointer-events: auto; }\n"
 
         return files_map
 
@@ -391,44 +386,20 @@ class GlassAgent:
     def _query_llm_engine(self, system_prompt: str, user_prompt: str) -> Tuple[Optional[str], str, Optional[str]]:
         nebius_key = os.getenv("NEBIUS_API_KEY", "").strip()
         nvidia_key = os.getenv("NVIDIA_API_KEY", "").strip()
-        api_error_log = None
-        
-        # 1. Primary Cloud: Nebius Token Factory (DeepSeek excluded)
-        if nebius_key:
-            for model_name in ["openai/gpt-oss-120b"]:
-                try:
-                    client = OpenAI(
-                        base_url="https://api.tokenfactory.us-central1.nebius.com/v1/",
-                        api_key=nebius_key,
-                        timeout=45.0
-                    )
-                    resp = client.chat.completions.create(
-                        model=model_name,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}
-                        ],
-                        temperature=0.1,
-                        max_tokens=4096
-                    )
-                    content = resp.choices[0].message.content
-                    if content and content.strip():
-                        return content, f"Nebius Cloud ({model_name})", None
-                except Exception as e:
-                    print(f"[Nebius Cloud ({model_name}) Error - Attempting next fallback]: {e}")
-                    api_error_log = str(e)
+        last_error = None
 
-        # 2. Secondary Cloud: NVIDIA NIM (Llama 3.3 70B Instruct)
-        if nvidia_key:
-            for model_name in ["meta/llama-3.3-70b-instruct"]:
+        # 1. Primary & Secondary Failover Chain (Nebius Token Factory)
+        if nebius_key:
+            client = OpenAI(
+                base_url=NEBIUS_BASE_URL,
+                api_key=nebius_key,
+                timeout=45.0
+            )
+            for idx, model in enumerate(MODEL_CHAIN):
                 try:
-                    client = OpenAI(
-                        base_url="https://integrate.api.nvidia.com/v1",
-                        api_key=nvidia_key,
-                        timeout=45.0
-                    )
+                    logger.info(f"Dispatching synthesis request to model: {model}")
                     resp = client.chat.completions.create(
-                        model=model_name,
+                        model=model,
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt}
@@ -438,20 +409,47 @@ class GlassAgent:
                     )
                     content = resp.choices[0].message.content
                     if content and content.strip():
-                        return content, f"NVIDIA NIM ({model_name})", None
+                        return content, f"Nebius Cloud ({model})", None
                 except Exception as e:
-                    print(f"[NVIDIA NIM ({model_name}) Error - Attempting next fallback]: {e}")
-                    api_error_log = str(e)
+                    last_error = e
+                    next_model = MODEL_CHAIN[idx + 1] if idx + 1 < len(MODEL_CHAIN) else ("NVIDIA NIM" if nvidia_key else "Local Ollama")
+                    logger.warning(f"Model {model} unavailable ({e}). Failing over to {next_model}...")
+
+        # 2. NVIDIA NIM Cloud Fallback
+        if nvidia_key:
+            try:
+                client = OpenAI(
+                    base_url=NVIDIA_BASE_URL,
+                    api_key=nvidia_key,
+                    timeout=45.0
+                )
+                logger.info(f"Dispatching failover request to NVIDIA NIM: {PRIMARY_MODEL}")
+                resp = client.chat.completions.create(
+                    model=PRIMARY_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.1,
+                    max_tokens=4096
+                )
+                content = resp.choices[0].message.content
+                if content and content.strip():
+                    return content, f"NVIDIA NIM ({PRIMARY_MODEL})", None
+            except Exception as e:
+                last_error = e
+                logger.warning(f"NVIDIA NIM failed ({e}). Attempting local fallback...")
 
         # 3. Fallback: Local Ollama on Apple Silicon Metal
         try:
             client = OpenAI(
-                base_url="http://localhost:11434/v1",
+                base_url=OLLAMA_BASE_URL,
                 api_key="ollama",
                 timeout=60.0
             )
+            logger.info(f"Dispatching request to Local Ollama ({LOCAL_MODEL})")
             resp = client.chat.completions.create(
-                model="qwen2.5-coder:7b",
+                model=LOCAL_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
@@ -459,9 +457,14 @@ class GlassAgent:
                 temperature=0.2,
                 max_tokens=4096
             )
-            return resp.choices[0].message.content, "Local Ollama (Qwen2.5-Coder 7B on Metal)", None
+            return resp.choices[0].message.content, f"Local Ollama ({LOCAL_MODEL} on Metal)", None
         except Exception as e:
-            return None, "Offline Synthesizer Engine", api_error_log or str(e)
+            last_error = e
+            logger.error(f"Local Ollama engine failed: {e}")
+
+        # All endpoints failed
+        error_msg = "[ERROR] All AI inference endpoints are currently unreachable. Please check environment configuration or provider API keys."
+        return None, "Offline Synthesizer Engine", error_msg
 
     def execute(self, prompt: str, file_name: Optional[str] = None, file_content: Optional[str] = None) -> Dict[str, Any]:
         steps = []
@@ -475,11 +478,16 @@ class GlassAgent:
             "3. If building a Web App (HTML/CSS/JS), ensure all DOM element IDs referenced in JavaScript actually exist in the HTML.\n"
             "4. Web Audio API Protocol: When building ADSR envelopes or synth nodes, NEVER call setValueAtTime() at the exact timestamp where linearRampToValueAtTime() or exponentialRampToValueAtTime() concludes. Ramps set values automatically at target times; duplicating setValueAtTime at the same timestamp crashes the timeline scheduler.\n"
             "5. Canvas & HUD Layering Protocol: When stacking a <canvas> with HUD/overlay/modal divs, the HUD container MUST have 'pointer-events: none' in CSS. Interactive elements (buttons, modals) inside the HUD MUST have 'pointer-events: auto' explicitly re-enabled, otherwise buttons will be completely unclickable.\n"
-            "6. DOM Safety Protocol: ALL document.getElementById(), querySelector(), and addEventListener() calls in .js files MUST be wrapped inside a 'window.addEventListener(DOMContentLoaded, ...)' block. Never query the DOM at the top level of a script file — if the script runs before HTML is parsed, every event listener will silently fail.\n"
-            "7. File Completeness Protocol: If your HTML references ANY external files via <script src='file.js'> or <link href='style.css'>, you MUST generate every single referenced file as its own complete code block in this response. Never reference a file you do not fully generate.\n"
-            "8. Format EVERY file block with its exact relative path:\n"
+            "6. Sandbox Script Execution Standard: Do NOT wrap main script logic in 'DOMContentLoaded' or window.onload. In our execution sandbox, scripts evaluate with the DOM already parsed; DOMContentLoaded listeners may miss the event and never execute. Define initialization functions (e.g. init(), startGame()) and invoke them directly at the bottom of the script.\n"
+            "7. CDN Library Standard: Always load heavy external libraries (Three.js, Phaser, Chart.js, Tone.js, Tailwind) via official CDN <script> tags in index.html (e.g. cdnjs, jsdelivr). NEVER attempt to generate local library mock files or write engine code from scratch.\n"
+            "8. File Completeness Protocol: If your HTML references ANY external files via <script src='file.js'> or <link href='style.css'>, you MUST generate every single referenced file as its own complete code block in this response. Never reference a file you do not fully generate.\n"
+            "9. Format EVERY file block with its exact relative path:\n"
             "```lang:relative/path/filename.ext\n<full code here>\n```\n"
-            "9. Make sure the code is completely self-contained and immediately executable without missing imports or dependencies."
+            "10. Make sure the code is completely self-contained and immediately executable without missing imports or dependencies.\n"
+            "11. Visual Polish & Aesthetics Baseline (1.5X Standard):\n"
+            "   - Colors: NEVER use raw primary color names ('red', 'blue', 'green', 'yellow'). Use modern, cohesive dark/light palettes (e.g. Cyberpunk #0d0e15, #00ffcc, #ff0055, or Slate/Indigo #0f172a, #6366f1) and apply linear/radial gradients to entities and backgrounds for depth.\n"
+            "   - Canvas & Entities: NEVER draw plain single-block `fillRect` squares for interactive objects or characters. Construct compound shapes (`roundRect`, `arc`, rims, highlights, eyes/wings) with glowing feedback (`shadowBlur`) and visual polish.\n"
+            "   - UI & Typography: Import Google Fonts ('Inter', 'Orbitron', or 'Press Start 2P') via CDN <link> in index.html. Style HUDs and cards with glassmorphism (`backdrop-filter: blur(12px)`, translucent borders `rgba(255,255,255,0.1)`, `border-radius: 12px`), with smooth active/hover button transitions."
         )
 
         # Build initial prompt with uploaded file content or existing workspace context
@@ -508,8 +516,8 @@ class GlassAgent:
             raw_output, engine_used, api_error_log = self._query_llm_engine(system_instruction, current_prompt)
 
             if not raw_output:
-                error_msg = api_error_log or "Unknown API timeout or empty response from model engines."
-                raise RuntimeError(f"Synthesis Failed: {error_msg}")
+                error_msg = api_error_log or "[ERROR] All AI inference endpoints are currently unreachable. Please check environment configuration or provider API keys."
+                raise RuntimeError(error_msg)
             
             target_name = file_name if file_name else ""
             parsed_list = CodeExtractor.parse_response(raw_output, prompt, target_name)

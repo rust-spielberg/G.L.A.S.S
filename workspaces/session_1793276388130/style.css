@@ -1,0 +1,67 @@
+html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #0d0d0d;
+    font-family: 'Orbitron', sans-serif;
+    color: #00ffcc;
+}
+#gameCanvas {
+    display: block;
+    background: #111;
+}
+#hud {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    background: rgba(20,20,20,0.4);
+    padding: 8px 12px;
+    border: 2px solid #00ffcc;
+    border-radius: 8px;
+    box-shadow: 0 0 10px #00ffcc;
+}
+#hud div {
+    text-shadow: 0 0 5px #00ffcc;
+}
+#gameOverModal {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+    visibility: hidden;
+    pointer-events: none;
+}
+#gameOverModal.visible {
+    visibility: visible;
+    pointer-events: auto;
+}
+#finalScore {
+    font-size: 2rem;
+    color: #ff0077;
+    text-shadow: 0 0 8px #ff0077;
+}
+#restartBtn {
+    padding: 12px 24px;
+    font-size: 1.2rem;
+    background: #00ffcc;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    pointer-events: auto;
+    box-shadow: 0 0 12px #00ffcc;
+}
+#restartBtn:hover {
+    background: #ff0077;
+    box-shadow: 0 0 12px #ff0077;
+}

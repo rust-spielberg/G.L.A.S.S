@@ -1,0 +1,62 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: 'Orbitron', sans-serif;
+  background: linear-gradient(to bottom, #70c5ce, #4fa8b3);
+}
+#gameCanvas {
+  display: block;
+  margin: auto;
+  background: #70c5ce;
+  border: 2px solid rgba(255,255,255,0.2);
+  box-shadow: 0 0 12px rgba(0,0,0,0.5);
+}
+#gameCanvas:focus { outline: none; }
+#hud {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 12px;
+  backdrop-filter: blur(12px);
+  color: #fff;
+  pointer-events: none;
+}
+#hud div { margin: 4px 0; }
+#gameOverModal {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.6);
+  pointer-events: none;
+}
+#gameOverModal.hidden {
+  display: none;
+}
+.modal-content {
+  background: rgba(255,255,255,0.15);
+  padding: 20px 30px;
+  border-radius: 12px;
+  backdrop-filter: blur(12px);
+  text-align: center;
+  color: #fff;
+  pointer-events: auto;
+}
+#restartBtn {
+  margin-top: 12px;
+  padding: 8px 16px;
+  background: #ff0055;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background .2s;
+}
+#restartBtn:hover { background: #ff3388; }
+.hidden { display: none; }

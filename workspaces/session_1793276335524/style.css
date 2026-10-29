@@ -1,0 +1,65 @@
+body {
+    margin: 0;
+    overflow: hidden;
+    background: #0a001f;
+    font-family: 'Arial', sans-serif;
+    color: #00ffcc;
+}
+canvas {
+    display: block;
+    background: #0a001f;
+}
+#hud {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    pointer-events: none; /* Ensure canvas receives clicks */
+    background: rgba(10,0,31,0.6);
+    padding: 10px 15px;
+    border: 2px solid #ff0077;
+    border-radius: 8px;
+    box-shadow: 0 0 10px #ff0077;
+}
+#hud div {
+    margin: 4px 0;
+    text-shadow: 0 0 5px #00ffcc;
+}
+#gameOverModal {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 800px;
+    height: 400px;
+    background: rgba(0,0,0,0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none; /* Allow clicks to pass through unless modal is active */
+}
+#gameOverModal .modalContent {
+    background: rgba(10,0,31,0.9);
+    padding: 30px;
+    border: 2px solid #ff0077;
+    border-radius: 12px;
+    text-align: center;
+    box-shadow: 0 0 20px #ff0077;
+    pointer-events: auto; /* Enable interaction with button */
+}
+#restartBtn {
+    margin-top: 15px;
+    padding: 10px 20px;
+    background: #ff0077;
+    border: none;
+    color: #00ffcc;
+    font-size: 1rem;
+    cursor: pointer;
+    border-radius: 6px;
+    pointer-events: auto; /* Explicitly interactive */
+    box-shadow: 0 0 8px #ff0077;
+}
+#restartBtn:hover {
+    background: #e60070;
+}
+.hidden {
+    display: none;
+}

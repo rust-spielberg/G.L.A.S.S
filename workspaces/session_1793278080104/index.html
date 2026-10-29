@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Maison de Farine</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="style.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+    <script src="app.js" defer></script>
+</head>
+<body>
+    <nav id="navbar">
+        <div class="logo">Maison de Farine</div>
+        <ul class="nav-links">
+            <li><a href="#heroSection" class="nav-link active">Home</a></li>
+            <li><a href="#menuSection" class="nav-link">Menu</a></li>
+            <li><a href="#gallerySection" class="nav-link">Gallery</a></li>
+            <li><a href="#inquirySection" class="nav-link">Inquiry Form</a></li>
+        </ul>
+        <div class="counter">🧁 <span id="requestCount">0</span></div>
+    </nav>
+
+    <section id="heroSection" class="hero">
+        <h1>Artisanal Cakes &amp; Pastries</h1>
+        <p>Hand‑crafted with love, tradition, and the finest ingredients.</p>
+        <a href="#inquirySection" class="cta-btn">Request Custom Order</a>
+    </section>
+
+    <section id="menuSection" class="section">
+        <h2>Our Menu</h2>
+        <div class="tabs">
+            <button class="tab active" data-filter="all">All</button>
+            <button class="tab" data-filter="cakes">Cakes</button>
+            <button class="tab" data-filter="tarts">Tarts</button>
+            <button class="tab" data-filter="breads">Breads</button>
+        </div>
+        <div class="cards">
+            <div class="card" data-category="cakes">
+                <h3>Vanilla Dream Cake</h3>
+                <p>Light sponge with vanilla bean buttercream.</p>
+                <span class="price">$24</span>
+                <button class="add-btn">Add to Inquiry</button>
+            </div>
+            <div class="card" data-category="tarts">
+                <h3>Lemon Thyme Tart</h3>
+                <p>Zesty lemon curd on a crisp almond crust.</p>
+                <span class="price">$18</span>
+                <button class="add-btn">Add to Inquiry</button>
+            </div>
+            <div class="card" data-category="breads">
+                <h3>Sourdough Boule</h3>
+                <p>Artisan sourdough with a crunchy crust.</p>
+                <span class="price">$12</span>
+                <button class="add-btn">Add to Inquiry</button>
+            </div>
+            <div class="card" data-category="cakes">
+                <h3>Chocolate Ganache Cake</h3>
+                <p>Rich chocolate layers with silky ganache.</p>
+                <span class="price">$28</span>
+                <button class="add-btn">Add to Inquiry</button>
+            </div>
+            <div class="card" data-category="tarts">
+                <h3>Raspberry Almond Tart</h3>
+                <p>Fresh raspberries atop almond frangipane.</p>
+                <span class="price">$20</span>
+                <button class="add-btn">Add to Inquiry</button>
+            </div>
+            <div class="card" data-category="breads">
+                <h3>Olive Focaccia</h3>
+                <p>Herb‑infused focaccia with black olives.</p>
+                <span class="price">$14</span>
+                <button class="add-btn">Add to Inquiry</button>
+            </div>
+        </div>
+    </section>
+
+    <section id="gallerySection" class="section">
+        <h2>Gallery</h2>
+        <div class="gallery">
+            <div class="gallery-card"><div class="img" style="background-image:url('https://picsum.photos/seed/1/400/300');"></div></div>
+            <div class="gallery-card"><div class="img" style="background-image:url('https://picsum.photos/seed/2/400/300');"></div></div>
+            <div class="gallery-card"><div class="img" style="background-image:url('https://picsum.photos/seed/3/400/300');"></div></div>
+            <div class="gallery-card"><div class="img" style="background-image:url('https://picsum.photos/seed/4/400/300');"></div></div>
+            <div class="gallery-card"><div class="img" style="background-image:url('https://picsum.photos/seed/5/400/300');"></div></div>
+            <div class="gallery-card"><div class="img" style="background-image:url('https://picsum.photos/seed/6/400/300');"></div></div>
+        </div>
+    </section>
+
+    <section id="inquirySection" class="section">
+        <h2>Custom Order Inquiry</h2>
+        <form id="inquiryForm" class="glass-form">
+            <input type="text" id="fullName" placeholder="Full Name" required>
+            <input type="tel" id="phoneNumber" placeholder="Phone Number" required>
+            <input type="email" id="emailAddress" placeholder="Email" required>
+            <input type="date" id="eventDate" required>
+            <select id="flavourSelect" required>
+                <option value="" disabled selected>Choose Cake Flavour</option>
+                <option>Vanilla</option>
+                <option>Chocolate</option>
+                <option>Lemon</option>
+                <option>Raspberry</option>
+                <option>Custom</option>
+            </select>
+            <textarea id="specialNotes" placeholder="Special Notes (e.g., product name)"></textarea>
+            <button type="submit" id="submitBtn">Send Request</button>
+        </form>
+    </section>
+
+    <div id="toastNotice" class="toast"></div>
+</body>
+</html>

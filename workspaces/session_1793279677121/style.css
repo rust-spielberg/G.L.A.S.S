@@ -1,0 +1,66 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: 'Orbitron', sans-serif;
+  background: linear-gradient(to bottom, #0f172a, #1e293b);
+  color: #fff;
+}
+#gameCanvas {
+  display: block;
+  margin: 0 auto;
+  background: #0d0e15;
+  border: 2px solid rgba(255,255,255,0.2);
+  box-shadow: 0 0 12px rgba(0,0,0,0.5);
+}
+#hud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 12px;
+  backdrop-filter: blur(12px);
+  pointer-events: none; /* HUD should not block canvas interactions */
+}
+#hud div {
+  margin: 4px 0;
+}
+#gameOverModal {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.6);
+  pointer-events: none; /* Overlay container must not block canvas */
+}
+#gameOverModal.hidden {
+  display: none;
+}
+.modal-content {
+  background: rgba(255,255,255,0.15);
+  padding: 20px 30px;
+  border-radius: 12px;
+  backdrop-filter: blur(12px);
+  text-align: center;
+  pointer-events: auto; /* Enable interaction inside modal */
+}
+#restartBtn {
+  margin-top: 12px;
+  padding: 8px 16px;
+  background: #ff0055;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background .2s;
+  pointer-events: auto; /* Ensure button is clickable */
+}
+#restartBtn:hover {
+  background: #ff3388;
+}
+.hidden {
+  display: none;
+}
