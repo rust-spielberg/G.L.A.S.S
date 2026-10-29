@@ -471,35 +471,51 @@ export function Playground() {
         body: formData
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.detail || "Backend server returned an error.");
+      if (!res.ok || !res.body) {
+        const errData = await res.json().catch(() => ({ detail: "Backend error" }));
+        throw new Error(errData.detail || "Backend server returned an error.");
       }
 
-      setTokens(prev => prev + (data.tokens?.total || 0));
-      if (data.steps) {
-        setSteps(data.steps);
-      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalFiles: string[] = [];
 
-      const createdFiles: string[] = [];
-      data.steps?.forEach((step: any) => {
-        if ((step.tool === "create_or_update_file" || step.tool === "refine_codebase") && step.args?.path) {
-          if (!createdFiles.includes(step.args.path)) {
-            createdFiles.push(step.args.path);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+            if (event.type === "step") {
+              setSteps(prev => [...prev, event.step]);
+            } else if (event.type === "completion") {
+              setTokens(prev => prev + (event.tokens?.total || 0));
+              if (event.files?.length > 0) {
+                finalFiles = event.files;
+                setFiles(event.files);
+                setSynthesisMode("edit");
+              }
+            } else if (event.type === "error") {
+              throw new Error(event.message);
+            }
+          } catch (parseErr: any) {
+            // Only re-throw real errors (not JSON parse failures on partial lines)
+            if (parseErr instanceof SyntaxError) continue;
+            throw parseErr;
           }
         }
-      });
+      }
 
-      if (createdFiles.length > 0) {
-        setFiles(createdFiles);
-        setSynthesisMode("edit"); // Auto-switch to Edit mode once files exist
-        await ensureWorkspaceFilesLoaded(createdFiles, activeSessionId ?? sessionId, true);
-        if (!activeFile || !createdFiles.includes(activeFile)) {
-          selectFile(createdFiles[0], true);
-        } else {
-          selectFile(activeFile, true);
-        }
+      // After stream completes, refresh cache and reload preview
+      if (finalFiles.length > 0) {
+        await ensureWorkspaceFilesLoaded(finalFiles, activeSessionId ?? sessionId, true);
+        selectFile(finalFiles[0], true);
       }
     } catch (err: any) {
       setSteps(prev => [

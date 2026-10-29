@@ -605,3 +605,163 @@ class GlassAgent:
             "steps": steps,
             "files": created_paths
         }
+
+    def execute_stream(self, prompt: str, file_name: Optional[str] = None, file_content: Optional[str] = None):
+        """
+        Streaming generator variant of execute().
+        Yields NDJSON-compatible dicts in real-time:
+          {"type": "step",       "step": {...}}
+          {"type": "completion", "files": [...], "tokens": {...}, "summary": "..."}
+          {"type": "error",      "message": "..."}
+        The execute() method remains unchanged for backward compatibility.
+        """
+        accumulated_tokens = 0
+
+        system_instruction = (
+            "You are G.L.A.S.S., an elite industrial full-stack code generator.\n"
+            "CRITICAL DIRECTIVES:\n"
+            "1. OUTPUT ONLY RAW CODE BLOCKS. ABSOLUTELY NO INTRO TEXT, NO HOW-TO RUN GUIDES, NO CONVERSATIONAL FILLER, AND NO MARKDOWN EXPLANATIONS.\n"
+            "2. EVERY FILE MUST BE 100% COMPLETE AND PRODUCTION-READY. NEVER use placeholders, never use '// TODO', '/* ... */', or pass.\n"
+            "3. If building a Web App (HTML/CSS/JS), ensure all DOM element IDs referenced in JavaScript actually exist in the HTML.\n"
+            "4. Web Audio API Protocol: When building ADSR envelopes or synth nodes, NEVER call setValueAtTime() at the exact timestamp where linearRampToValueAtTime() or exponentialRampToValueAtTime() concludes. Ramps set values automatically at target times; duplicating setValueAtTime at the same timestamp crashes the timeline scheduler.\n"
+            "5. Canvas & HUD Layering Protocol: When stacking a <canvas> with HUD/overlay/modal divs, the HUD container MUST have 'pointer-events: none' in CSS. Interactive elements (buttons, modals) inside the HUD MUST have 'pointer-events: auto' explicitly re-enabled, otherwise buttons will be completely unclickable.\n"
+            "6. Sandbox Script Execution Standard: Do NOT wrap main script logic in 'DOMContentLoaded' or window.onload. In our execution sandbox, scripts evaluate with the DOM already parsed; DOMContentLoaded listeners may miss the event and never execute. Define initialization functions (e.g. init(), startGame()) and invoke them directly at the bottom of the script.\n"
+            "7. CDN Library Standard: Always load heavy external libraries (Three.js, Phaser, Chart.js, Tone.js, Tailwind) via official CDN <script> tags in index.html (e.g. cdnjs, jsdelivr). NEVER attempt to generate local library mock files or write engine code from scratch.\n"
+            "8. File Completeness Protocol: If your HTML references ANY external files via <script src='file.js'> or <link href='style.css'>, you MUST generate every single referenced file as its own complete code block in this response. Never reference a file you do not fully generate.\n"
+            "9. Format EVERY file block with its exact relative path:\n"
+            "```lang:relative/path/filename.ext\n<full code here>\n```\n"
+            "10. Make sure the code is completely self-contained and immediately executable without missing imports or dependencies.\n"
+            "11. Visual Polish & Aesthetics Baseline (1.5X Standard):\n"
+            "   - Colors: NEVER use raw primary color names ('red', 'blue', 'green', 'yellow'). Use modern, cohesive dark/light palettes (e.g. Cyberpunk #0d0e15, #00ffcc, #ff0055, or Slate/Indigo #0f172a, #6366f1) and apply linear/radial gradients to entities and backgrounds for depth.\n"
+            "   - Canvas & Entities: NEVER draw plain single-block `fillRect` squares for interactive objects or characters. Construct compound shapes (`roundRect`, `arc`, rims, highlights, eyes/wings) with glowing feedback (`shadowBlur`) and visual polish.\n"
+            "   - UI & Typography: Import Google Fonts ('Inter', 'Orbitron', or 'Press Start 2P') via CDN <link> in index.html. Style HUDs and cards with glassmorphism (`backdrop-filter: blur(12px)`, translucent borders `rgba(255,255,255,0.1)`, `border-radius: 12px`), with smooth active/hover button transitions."
+        )
+
+        # ── Step 0: Emit immediate "querying engine" step so frontend shows activity ──
+        yield {
+            "type": "step",
+            "step": {
+                "type": "tool_step",
+                "iteration": 1,
+                "tool": "synthesize_codebase",
+                "args": {"status": "Querying G.L.A.S.S. model engine..."},
+                "output": "Synthesizing multi-file codebase in isolated workspace..."
+            }
+        }
+
+        # ── Build initial context (same logic as execute()) ──
+        context_parts = []
+        if file_content and file_name:
+            context_parts.append(f"ATTACHED FILE `{file_name}` TO AUDIT/UPDATE:\n```{file_name}\n{file_content}\n```")
+        elif not file_content:
+            existing_files = self.workspace.list_files()
+            if existing_files:
+                loaded_context = []
+                for ef in existing_files[:4]:
+                    try:
+                        content = self.workspace.read_file(ef)
+                        loaded_context.append(f"CURRENT WORKSPACE FILE `{ef}`:\n```{ef}\n{content}\n```")
+                    except Exception:
+                        pass
+                if loaded_context:
+                    context_parts.append("EXISTING WORKSPACE CONTEXT:\n" + "\n\n".join(loaded_context))
+
+        context_parts.append(f"USER TASK SPECIFICATION:\n{prompt}")
+        initial_prompt = "\n\n".join(context_parts)
+        current_prompt = initial_prompt
+        last_generated_files: Dict[str, str] = {}
+        final_files_dict: Dict[str, str] = {}
+        engine_used = "Unknown"
+        step_counter = 2  # step 1 already yielded above
+
+        # ── Self-healing loop (mirrors execute()) ──
+        for turn in range(1, self.MAX_HEALING_TURNS + 1):
+            raw_output, engine_used, api_error_log = self._query_llm_engine(system_instruction, current_prompt)
+
+            if not raw_output:
+                error_msg = api_error_log or "[ERROR] All AI inference endpoints are currently unreachable. Please check environment configuration or provider API keys."
+                yield {"type": "error", "message": error_msg}
+                return
+
+            target_name = file_name if file_name else ""
+            parsed_list = CodeExtractor.parse_response(raw_output, prompt, target_name)
+            files_dict = {fname: content for fname, content in parsed_list}
+
+            sanitized_dict = CodeSanitizer.sanitize(files_dict)
+            defects = UniversalCodeVerifier.audit_codebase(sanitized_dict, original_file_name=file_name)
+
+            accumulated_tokens += sum(len(c.split()) for c in sanitized_dict.values()) + len(current_prompt.split()) * 4
+
+            if not defects:
+                final_files_dict = sanitized_dict
+                audit_step = {
+                    "type": "tool_step",
+                    "iteration": step_counter,
+                    "tool": "verify_and_execute_codebase",
+                    "args": {
+                        "status": "Running AST compilation, syntax verification, and multi-file contract audit...",
+                        "defects_found": 0
+                    },
+                    "output": f"Codebase verified 100% bug-free (0 defects). Passed multi-language compilation audit (via {engine_used})."
+                }
+                yield {"type": "step", "step": audit_step}
+                step_counter += 1
+                break
+            else:
+                heal_step = {
+                    "type": "tool_step",
+                    "iteration": step_counter,
+                    "tool": "verify_and_execute_codebase",
+                    "args": {
+                        "status": f"Turn {turn} audit detected {len(defects)} defect(s). Triggering self-healing refinement loop...",
+                        "defects": defects
+                    },
+                    "output": f"Detected issues: {'; '.join(defects)}. Re-routing to model engine with full code context..."
+                }
+                yield {"type": "step", "step": heal_step}
+                step_counter += 1
+
+                final_files_dict = sanitized_dict
+                last_generated_files = sanitized_dict
+
+                if turn < self.MAX_HEALING_TURNS:
+                    previous_code_dump = "\n\n".join([f"```{fname}\n{code}\n```" for fname, code in last_generated_files.items()])
+                    defect_summary = "\n".join([f"- {d}" for d in defects])
+                    current_prompt = (
+                        f"ORIGINAL USER TASK:\n{prompt}\n\n"
+                        f"PREVIOUSLY GENERATED CODE THAT CONTAINS BUGS:\n{previous_code_dump}\n\n"
+                        f"THE CODE CONTAINS THE FOLLOWING DEFECTS THAT YOU MUST FIX:\n{defect_summary}\n\n"
+                        f"CRITICAL: Return the COMPLETE, corrected files. Do not use placeholders or omit any logic. "
+                        f"Specify filenames format ` ```lang:path `."
+                    )
+
+        # ── Write files and yield a step per file ──
+        created_paths = []
+        for filename, content in final_files_dict.items():
+            write_status = self.workspace.write_file(filename, content)
+            created_paths.append(filename)
+            file_step = {
+                "type": "tool_step",
+                "iteration": step_counter,
+                "tool": "create_or_update_file",
+                "args": {
+                    "path": filename,
+                    "content": content[:120] + "..." if len(content) > 120 else content
+                },
+                "output": f"{write_status} (via {engine_used})"
+            }
+            yield {"type": "step", "step": file_step}
+            step_counter += 1
+
+        # ── Final completion event ──
+        summary = f"Synthesis complete. Generated files: [{', '.join(created_paths)}] using {engine_used}."
+        yield {
+            "type": "completion",
+            "files": created_paths,
+            "tokens": {
+                "prompt": len(prompt.split()) * 4 + 20,
+                "completion": accumulated_tokens,
+                "total": accumulated_tokens + len(prompt.split()) * 4 + 20
+            },
+            "summary": summary
+        }

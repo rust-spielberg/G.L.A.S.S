@@ -1,9 +1,10 @@
 from fastapi import FastAPI, Form, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from typing import Optional
 import shutil
 import os
+import json
 import zipfile
 from agent import GlassAgent, WORKSPACES_DIR
 
@@ -34,29 +35,37 @@ app.add_middleware(
 )
 
 @app.post("/api/agent/run")
-def run_agent(
+async def run_agent(
     prompt: str = Form(...),
     session_id: str = Form("default_session"),
     file: Optional[UploadFile] = File(None)
 ):
-    try:
-        agent = GlassAgent(session_id=session_id)
-        file_name = None
-        file_content = None
+    agent = GlassAgent(session_id=session_id)
+    file_name = None
+    file_content = None
 
-        if file:
-            file_name = file.filename
-            content_bytes = file.file.read()
-            file_content = content_bytes.decode("utf-8", errors="ignore")
+    if file:
+        file_name = file.filename
+        content_bytes = await file.read()
+        file_content = content_bytes.decode("utf-8", errors="ignore")
 
-        result = agent.execute(prompt=prompt, file_name=file_name, file_content=file_content)
-        return result
-    except Exception as e:
-        print(f"[Server Execution Error]: {e}")
-        err_str = str(e)
-        if "All AI inference endpoints are currently unreachable" in err_str:
-            raise HTTPException(status_code=503, detail="[ERROR] All AI inference endpoints are currently unreachable. Please check environment configuration or provider API keys.")
-        raise HTTPException(status_code=500, detail=err_str)
+    def event_stream():
+        try:
+            for event in agent.execute_stream(prompt=prompt, file_name=file_name, file_content=file_content):
+                yield json.dumps(event) + "\n"
+        except Exception as e:
+            err = str(e)
+            yield json.dumps({"type": "error", "message": f"Synthesis Error: {err}"}) + "\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"     # Disables Nginx/Render response buffering
+        }
+    )
 
 @app.get("/api/workspace/file/{filename:path}")
 def read_workspace_file(filename: str, session_id: str = "default_session"):
