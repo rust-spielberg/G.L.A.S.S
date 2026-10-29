@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Form, File, UploadFile, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Optional
 import shutil
 import os
@@ -10,9 +11,6 @@ from agent import GlassAgent, WORKSPACES_DIR
 
 app = FastAPI(title="G.L.A.S.S. API")
 
-# =============================================================================
-# PRODUCTION CORS & PREFLIGHT CONFIGURATION (Netlify + Localhost)
-# =============================================================================
 ALLOWED_ORIGINS = [
     "https://glass-ai-agent.netlify.app",
     "http://localhost:5173",
@@ -28,6 +26,27 @@ if raw_origins and raw_origins != "*":
         if clean and clean not in ALLOWED_ORIGINS:
             ALLOWED_ORIGINS.append(clean)
 
+# =============================================================================
+# 1. GUARANTEED CORS MIDDLEWARE (Attaches CORS to 100% of responses & crashes)
+# =============================================================================
+class ForceCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        origin = request.headers.get("origin", "https://glass-ai-agent.netlify.app")
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            response = JSONResponse(
+                status_code=500,
+                content={"status": "error", "message": f"Server Exception: {str(exc)}"}
+            )
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PUT, DELETE, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        return response
+
+app.add_middleware(ForceCORSMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -37,6 +56,23 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+# =============================================================================
+# 2. GLOBAL EXCEPTION HANDLER (Ensures JSON errors always have CORS headers)
+# =============================================================================
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    origin = request.headers.get("origin", "https://glass-ai-agent.netlify.app")
+    return JSONResponse(
+        status_code=500,
+        content={"status": "error", "message": f"Internal Server Error: {str(exc)}"},
+        headers={
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE, PATCH",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
 
 # Explicit OPTIONS preflight handler (Express equivalent: app.options('*', cors()))
 @app.options("/{rest_of_path:path}")
@@ -53,27 +89,38 @@ async def preflight_catchall(rest_of_path: str):
 
 @app.post("/api/agent/run")
 async def run_agent(request: Request):
-    content_type = request.headers.get("content-type", "")
-    prompt = ""
-    session_id = "default_session"
-    file_name = None
-    file_content = None
+    try:
+        content_type = request.headers.get("content-type", "")
+        prompt = ""
+        session_id = "default_session"
+        file_name = None
+        file_content = None
 
-    if "application/json" in content_type:
-        body = await request.json()
-        prompt = body.get("prompt", "")
-        session_id = body.get("session_id", "default_session")
-    else:
-        form = await request.form()
-        prompt = form.get("prompt", "")
-        session_id = form.get("session_id", "default_session")
-        uploaded = form.get("file")
-        if uploaded and hasattr(uploaded, "filename") and uploaded.filename:
-            file_name = uploaded.filename
-            content_bytes = await uploaded.read()
-            file_content = content_bytes.decode("utf-8", errors="ignore")
+        if "application/json" in content_type:
+            body = await request.json()
+            prompt = body.get("prompt", "")
+            session_id = body.get("session_id", "default_session")
+        else:
+            form = await request.form()
+            prompt = form.get("prompt", "")
+            session_id = form.get("session_id", "default_session")
+            uploaded = form.get("file")
+            if uploaded and hasattr(uploaded, "filename") and uploaded.filename:
+                file_name = uploaded.filename
+                content_bytes = await uploaded.read()
+                file_content = content_bytes.decode("utf-8", errors="ignore")
 
-    agent = GlassAgent(session_id=session_id)
+        agent = GlassAgent(session_id=session_id)
+    except Exception as e:
+        origin = request.headers.get("origin", "https://glass-ai-agent.netlify.app")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"Request Parsing Error: {str(e)}"},
+            headers={
+                "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Credentials": "true",
+            }
+        )
 
     def event_stream():
         # Immediate ping to establish HTTP 200 and prevent cold-start proxy timeouts
