@@ -369,7 +369,15 @@ class CodeExtractor:
         if not extracted and llm_text.strip():
             clean_code = re.sub(r"^```[a-zA-Z]*\n", "", llm_text, flags=re.MULTILINE)
             clean_code = re.sub(r"```$", "", clean_code, flags=re.MULTILINE).strip()
-            fallback = default_filename if default_filename else "main.py"
+            
+            # Content-aware and prompt-aware fallback detection:
+            prompt_lower = prompt.lower()
+            if "<!doctype html" in clean_code.lower() or "<html" in clean_code.lower() or "index.html" in prompt_lower or "html" in prompt_lower or "web" in prompt_lower:
+                fallback = "index.html"
+            elif default_filename:
+                fallback = default_filename
+            else:
+                fallback = "main.py"
             extracted.append((fallback, clean_code))
             
         return extracted
@@ -393,7 +401,7 @@ class GlassAgent:
             client = OpenAI(
                 base_url=NEBIUS_BASE_URL,
                 api_key=nebius_key,
-                timeout=45.0
+                timeout=90.0
             )
             for idx, model in enumerate(MODEL_CHAIN):
                 try:
@@ -405,7 +413,7 @@ class GlassAgent:
                             {"role": "user", "content": user_prompt}
                         ],
                         temperature=0.1,
-                        max_tokens=4096
+                        max_tokens=8192
                     )
                     content = resp.choices[0].message.content
                     if content and content.strip():
@@ -421,7 +429,7 @@ class GlassAgent:
                 client = OpenAI(
                     base_url=NVIDIA_BASE_URL,
                     api_key=nvidia_key,
-                    timeout=45.0
+                    timeout=90.0
                 )
                 logger.info(f"Dispatching failover request to NVIDIA NIM: {PRIMARY_MODEL}")
                 resp = client.chat.completions.create(
@@ -431,7 +439,7 @@ class GlassAgent:
                         {"role": "user", "content": user_prompt}
                     ],
                     temperature=0.1,
-                    max_tokens=4096
+                    max_tokens=8192
                 )
                 content = resp.choices[0].message.content
                 if content and content.strip():
@@ -445,7 +453,7 @@ class GlassAgent:
             client = OpenAI(
                 base_url=OLLAMA_BASE_URL,
                 api_key="ollama",
-                timeout=60.0
+                timeout=90.0
             )
             logger.info(f"Dispatching request to Local Ollama ({LOCAL_MODEL})")
             resp = client.chat.completions.create(
@@ -455,7 +463,7 @@ class GlassAgent:
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.2,
-                max_tokens=4096
+                max_tokens=8192
             )
             return resp.choices[0].message.content, f"Local Ollama ({LOCAL_MODEL} on Metal)", None
         except Exception as e:
@@ -487,7 +495,10 @@ class GlassAgent:
             "11. Visual Polish & Aesthetics Baseline (1.5X Standard):\n"
             "   - Colors: NEVER use raw primary color names ('red', 'blue', 'green', 'yellow'). Use modern, cohesive dark/light palettes (e.g. Cyberpunk #0d0e15, #00ffcc, #ff0055, or Slate/Indigo #0f172a, #6366f1) and apply linear/radial gradients to entities and backgrounds for depth.\n"
             "   - Canvas & Entities: NEVER draw plain single-block `fillRect` squares for interactive objects or characters. Construct compound shapes (`roundRect`, `arc`, rims, highlights, eyes/wings) with glowing feedback (`shadowBlur`) and visual polish.\n"
-            "   - UI & Typography: Import Google Fonts ('Inter', 'Orbitron', or 'Press Start 2P') via CDN <link> in index.html. Style HUDs and cards with glassmorphism (`backdrop-filter: blur(12px)`, translucent borders `rgba(255,255,255,0.1)`, `border-radius: 12px`), with smooth active/hover button transitions."
+            "   - UI & Typography: Import Google Fonts ('Inter', 'Orbitron', or 'Press Start 2P') via CDN <link> in index.html. Style HUDs and cards with glassmorphism (`backdrop-filter: blur(12px)`, translucent borders `rgba(255,255,255,0.1)`, `border-radius: 12px`), with smooth active/hover button transitions.\n"
+            "12. STRICT PROMPT COMPLIANCE & ACCURATE TARGET TECHNOLOGY:\n"
+            "   - Read the user prompt in its entirety. Fully implement every feature, mathematical operation, UI element, and detailed requirement requested.\n"
+            "   - TARGET THE EXACT REQUESTED TECHNOLOGY & FILENAMES: If the prompt specifies index.html, HTML, web application, CSS, or JS, you MUST produce index.html, style.css, and script.js. NEVER return a Python script (main.py) when web/HTML was requested."
         )
 
         # Build initial prompt with uploaded file content or existing workspace context
@@ -495,19 +506,34 @@ class GlassAgent:
         if file_content and file_name:
             context_parts.append(f"ATTACHED FILE `{file_name}` TO AUDIT/UPDATE:\n```{file_name}\n{file_content}\n```")
         elif not file_content:
-            existing_files = self.workspace.list_files()
-            if existing_files:
-                loaded_context = []
-                for ef in existing_files[:4]:  # Include up to 4 primary existing workspace files
-                    try:
-                        content = self.workspace.read_file(ef)
-                        loaded_context.append(f"CURRENT WORKSPACE FILE `{ef}`:\n```{ef}\n{content}\n```")
-                    except Exception:
-                        pass
-                if loaded_context:
-                    context_parts.append("EXISTING WORKSPACE CONTEXT:\n" + "\n\n".join(loaded_context))
+            prompt_lower = prompt.lower()
+            is_new_request = any(k in prompt_lower for k in ["make", "create", "build", "generate", "new", "index.html", "write a", "scientific calculator"])
+            
+            # Only inject existing workspace files if the user is explicitly refining/editing existing code
+            if not is_new_request:
+                existing_files = self.workspace.list_files()
+                if existing_files:
+                    loaded_context = []
+                    for ef in existing_files[:4]:  # Include up to 4 primary existing workspace files
+                        try:
+                            content = self.workspace.read_file(ef)
+                            loaded_context.append(f"CURRENT WORKSPACE FILE `{ef}`:\n```{ef}\n{content}\n```")
+                        except Exception:
+                            pass
+                    if loaded_context:
+                        context_parts.append("EXISTING WORKSPACE CONTEXT:\n" + "\n\n".join(loaded_context))
 
-        context_parts.append(f"USER TASK SPECIFICATION:\n{prompt}")
+        # Anchor user task specification with strict execution reminders at the bottom
+        context_parts.append(
+            f"USER TASK SPECIFICATION (READ EVERY REQUIREMENT THOROUGHLY):\n{prompt}\n\n"
+            "=======================================================\n"
+            "CRITICAL EXECUTION MANDATE FOR THE ABOVE SPECIFICATION:\n"
+            "1. Read and fulfill 100% of all detailed requirements described above.\n"
+            "2. If web/HTML/calculator was requested, produce `index.html`, `style.css`, and `script.js`.\n"
+            "3. DO NOT substitute requested web files with Python (`main.py`).\n"
+            "4. Return COMPLETE, fully implemented code blocks without placeholders.\n"
+            "======================================================="
+        )
         initial_prompt = "\n\n".join(context_parts)
         current_prompt = initial_prompt
         last_generated_files: Dict[str, str] = {}
@@ -634,7 +660,10 @@ class GlassAgent:
             "11. Visual Polish & Aesthetics Baseline (1.5X Standard):\n"
             "   - Colors: NEVER use raw primary color names ('red', 'blue', 'green', 'yellow'). Use modern, cohesive dark/light palettes (e.g. Cyberpunk #0d0e15, #00ffcc, #ff0055, or Slate/Indigo #0f172a, #6366f1) and apply linear/radial gradients to entities and backgrounds for depth.\n"
             "   - Canvas & Entities: NEVER draw plain single-block `fillRect` squares for interactive objects or characters. Construct compound shapes (`roundRect`, `arc`, rims, highlights, eyes/wings) with glowing feedback (`shadowBlur`) and visual polish.\n"
-            "   - UI & Typography: Import Google Fonts ('Inter', 'Orbitron', or 'Press Start 2P') via CDN <link> in index.html. Style HUDs and cards with glassmorphism (`backdrop-filter: blur(12px)`, translucent borders `rgba(255,255,255,0.1)`, `border-radius: 12px`), with smooth active/hover button transitions."
+            "   - UI & Typography: Import Google Fonts ('Inter', 'Orbitron', or 'Press Start 2P') via CDN <link> in index.html. Style HUDs and cards with glassmorphism (`backdrop-filter: blur(12px)`, translucent borders `rgba(255,255,255,0.1)`, `border-radius: 12px`), with smooth active/hover button transitions.\n"
+            "12. STRICT PROMPT COMPLIANCE & ACCURATE TARGET TECHNOLOGY:\n"
+            "   - Read the user prompt in its entirety. Fully implement every feature, mathematical operation, UI element, and detailed requirement requested.\n"
+            "   - TARGET THE EXACT REQUESTED TECHNOLOGY & FILENAMES: If the prompt specifies index.html, HTML, web application, CSS, or JS, you MUST produce index.html, style.css, and script.js. NEVER return a Python script (main.py) when web/HTML was requested."
         )
 
         # ── Step 0: Emit immediate "querying engine" step so frontend shows activity ──
@@ -654,19 +683,34 @@ class GlassAgent:
         if file_content and file_name:
             context_parts.append(f"ATTACHED FILE `{file_name}` TO AUDIT/UPDATE:\n```{file_name}\n{file_content}\n```")
         elif not file_content:
-            existing_files = self.workspace.list_files()
-            if existing_files:
-                loaded_context = []
-                for ef in existing_files[:4]:
-                    try:
-                        content = self.workspace.read_file(ef)
-                        loaded_context.append(f"CURRENT WORKSPACE FILE `{ef}`:\n```{ef}\n{content}\n```")
-                    except Exception:
-                        pass
-                if loaded_context:
-                    context_parts.append("EXISTING WORKSPACE CONTEXT:\n" + "\n\n".join(loaded_context))
+            prompt_lower = prompt.lower()
+            is_new_request = any(k in prompt_lower for k in ["make", "create", "build", "generate", "new", "index.html", "write a", "scientific calculator"])
+            
+            # Only inject existing workspace files if the user is explicitly refining/editing existing code
+            if not is_new_request:
+                existing_files = self.workspace.list_files()
+                if existing_files:
+                    loaded_context = []
+                    for ef in existing_files[:4]:
+                        try:
+                            content = self.workspace.read_file(ef)
+                            loaded_context.append(f"CURRENT WORKSPACE FILE `{ef}`:\n```{ef}\n{content}\n```")
+                        except Exception:
+                            pass
+                    if loaded_context:
+                        context_parts.append("EXISTING WORKSPACE CONTEXT:\n" + "\n\n".join(loaded_context))
 
-        context_parts.append(f"USER TASK SPECIFICATION:\n{prompt}")
+        # Anchor user task specification with strict execution reminders at the bottom
+        context_parts.append(
+            f"USER TASK SPECIFICATION (READ EVERY REQUIREMENT THOROUGHLY):\n{prompt}\n\n"
+            "=======================================================\n"
+            "CRITICAL EXECUTION MANDATE FOR THE ABOVE SPECIFICATION:\n"
+            "1. Read and fulfill 100% of all detailed requirements described above.\n"
+            "2. If web/HTML/calculator was requested, produce `index.html`, `style.css`, and `script.js`.\n"
+            "3. DO NOT substitute requested web files with Python (`main.py`).\n"
+            "4. Return COMPLETE, fully implemented code blocks without placeholders.\n"
+            "======================================================="
+        )
         initial_prompt = "\n\n".join(context_parts)
         current_prompt = initial_prompt
         last_generated_files: Dict[str, str] = {}
