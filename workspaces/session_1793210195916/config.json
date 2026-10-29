@@ -1,0 +1,10 @@
+{
+    "pomodoro": 1500,
+    "shortBreak": 300,
+    "longBreak": 900,
+    "cycles": 4,
+    "colors": {
+        "primary": "#00ffea",
+        "secondary": "#ff00d5"
+    }
+}

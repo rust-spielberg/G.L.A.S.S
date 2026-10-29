@@ -1,0 +1,7 @@
+{
+    "workDuration": 1500,
+    "shortBreak": 300,
+    "longBreak": 900,
+    "cyclesBeforeLong": 4,
+    "themeColor": "#0ff"
+}

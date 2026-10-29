@@ -1,0 +1,182 @@
+We'll create a complete memory flipboard game with a C++ backend server and an HTML/CSS/JS frontend. The C++ server handles game logic and serves the web page, making it playable locally via `localhost:8080`.
+
+## How to Run
+
+1. Save the C++ code as `server.cpp`.
+2. Compile: `g++ -o server server.cpp -std=c++11`
+3. Run: `./server`
+4. Open your browser to `http://localhost:8080`
+
+The game will be a 4×4 grid (8 pairs). Click cards to flip them; match all pairs to win.
+
+---
+
+## C++ Server (`server.cpp`)
+
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <cstring>
+#include <vector>
+#include <cstdlib>
+#include <ctime>
+#include <algorithm>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+// ---------- Game State ----------
+class GameState {
+private:
+    std::vector<int> cards;      // card values (0-7)
+    std::vector<bool> faceUp;    // true if currently face up
+    std::vector<bool> matched;   // true if permanently matched
+    int firstFlipped;            // index of first flipped card, -1 if none
+    int moves;
+
+public:
+    GameState() { reset(); }
+
+    void reset() {
+        cards.clear();
+        faceUp.clear();
+        matched.clear();
+        // 8 pairs = 16 cards
+        for (int i = 0; i < 8; ++i) {
+            cards.push_back(i);
+            cards.push_back(i);
+        }
+        // shuffle
+        std::srand(static_cast<unsigned>(std::time(nullptr)));
+        std::random_shuffle(cards.begin(), cards.end());
+
+        faceUp.assign(16, false);
+        matched.assign(16, false);
+        firstFlipped = -1;
+        moves = 0;
+    }
+
+    // Returns JSON response for a flip action
+    std::string flip(int index) {
+        std::ostringstream json;
+        if (index < 0 || index >= 16 || faceUp[index] || matched[index]) {
+            json << "{\"status\":\"error\",\"message\":\"Invalid move\"}";
+            return json.str();
+        }
+
+        if (firstFlipped == -1) {
+            // first flip
+            firstFlipped = index;
+            faceUp[index] = true;
+            json << "{\"status\":\"ok\",\"flipped\":[" << index << "],\"values\":["
+                 << cards[index] << "],\"matched\":false,\"gameOver\":false,\"board\":[";
+            for (int i = 0; i < 16; ++i) json << (faceUp[i] ? "true" : "false") << (i < 15 ? "," : "");
+            json << "],\"moves\":" << moves << "}";
+        } else {
+            // second flip
+            int first = firstFlipped;
+            faceUp[index] = true;
+            moves++;
+            bool isMatch = (cards[first] == cards[index]);
+            if (isMatch) {
+                matched[first] = true;
+                matched[index] = true;
+            } else {
+                // will be flipped back by frontend after delay
+                faceUp[first] = false;
+                faceUp[index] = false;
+            }
+            firstFlipped = -1;
+
+            bool gameOver = true;
+            for (bool m : matched) if (!m) { gameOver = false; break; }
+
+            json << "{\"status\":\"ok\",\"flipped\":[" << first << "," << index << "],\"values\":["
+                 << cards[first] << "," << cards[index] << "],\"matched\":"
+                 << (isMatch ? "true" : "false") << ",\"gameOver\":"
+                 << (gameOver ? "true" : "false") << ",\"board\":[";
+            for (int i = 0; i < 16; ++i) json << (faceUp[i] ? "true" : "false") << (i < 15 ? "," : "");
+            json << "],\"moves\":" << moves << "}";
+        }
+        return json.str();
+    }
+
+    // Returns JSON for reset
+    std::string resetJSON() {
+        reset();
+        std::ostringstream json;
+        json << "{\"status\":\"ok\",\"flipped\":[],\"values\":[],\"matched\":false,\"gameOver\":false,\"board\":[";
+        for (int i = 0; i < 16; ++i) json << "false" << (i < 15 ? "," : "");
+        json << "],\"moves\":0}";
+        return json.str();
+    }
+};
+
+// ---------- HTTP Server ----------
+const std::string HTML_PAGE = R"HTML(
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flipboard Memory Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #2c3e50;
+            margin: 0;
+        }
+        .game-container {
+            text-align: center;
+            background: #34495e;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        h1 {
+            color: #ecf0f1;
+            margin-bottom: 20px;
+        }
+        .board {
+            display: grid;
+            grid-template-columns: repeat(4, 100px);
+            grid-gap: 10px;
+            justify-content: center;
+            margin: 20px auto;
+        }
+        .card {
+            width: 100px;
+            height: 100px;
+            background: #ecf0f1;
+            border-radius: 8px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 2em;
+            font-weight: bold;
+            color: #2c3e50;
+            cursor: pointer;
+            transition: transform 0.3s, background 0.3s;
+            user-select: none;
+        }
+        .card.face-up {
+            background: #f1c40f;
+            transform: rotateY(180deg);
+        }
+        .card.matched {
+            background: #2ecc71;
+            cursor: default;
+        }
+        .card:hover:not(.face-up):not(.matched) {
+            background: #bdc3c7;
+        }
+        .info {
+            color: #ecf0f1;
+            font-size: 1.2em;
+            margin: 10px;

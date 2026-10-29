@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Neon Pomodoro Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>🕶️ Neon Pomodoro</h1>
+    </header>
+
+    <main class="container">
+        <section class="timer-section">
+            <div id="timer-display">25:00</div>
+            <div class="controls">
+                <button id="start-btn">Start</button>
+                <button id="pause-btn">Pause</button>
+                <button id="reset-btn">Reset</button>
+            </div>
+        </section>
+
+        <section class="tasks-section">
+            <h2>Tasks</h2>
+            <div class="task-input">
+                <input type="text" id="new-task" placeholder="Add a new task...">
+                <button id="add-task-btn">Add</button>
+            </div>
+            <ul id="task-list"></ul>
+        </section>
+    </main>
+
+    <script src="timer.js" type="module"></script>
+    <script src="tasks.js" type="module"></script>
+</body>
+</html>
