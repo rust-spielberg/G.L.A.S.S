@@ -1,7 +1,6 @@
 from fastapi import FastAPI, Form, File, UploadFile, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Optional
 import shutil
 import os
@@ -27,25 +26,39 @@ if raw_origins and raw_origins != "*":
             ALLOWED_ORIGINS.append(clean)
 
 # =============================================================================
-# 1. GUARANTEED CORS MIDDLEWARE (Attaches CORS to 100% of responses & crashes)
+# 1. GUARANTEED PURE ASGI CORS MIDDLEWARE (Compatible with StreamingResponse)
 # =============================================================================
-class ForceCORSMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        origin = request.headers.get("origin", "https://glass-ai-agent.netlify.app")
-        try:
-            response = await call_next(request)
-        except Exception as exc:
-            response = JSONResponse(
-                status_code=500,
-                content={"status": "error", "message": f"Server Exception: {str(exc)}"}
-            )
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PUT, DELETE, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "*"
-        return response
+class PureASGICORSMiddleware:
+    def __init__(self, app):
+        self.app = app
 
-app.add_middleware(ForceCORSMiddleware)
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        origin = "https://glass-ai-agent.netlify.app"
+        for header, value in scope.get("headers", []):
+            if header.lower() == b"origin":
+                origin = value.decode("utf-8")
+                break
+
+        async def send_with_cors(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                # Append CORS headers cleanly without duplicate keys
+                headers = [(k, v) for k, v in headers if not k.lower().startswith(b"access-control-")]
+                headers.append((b"access-control-allow-origin", origin.encode()))
+                headers.append((b"access-control-allow-credentials", b"true"))
+                headers.append((b"access-control-allow-methods", b"GET, POST, OPTIONS, PUT, DELETE, PATCH"))
+                headers.append((b"access-control-allow-headers", b"*"))
+                headers.append((b"access-control-expose-headers", b"*"))
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_with_cors)
+
+app.add_middleware(PureASGICORSMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,6 +113,8 @@ async def run_agent(request: Request):
             body = await request.json()
             prompt = body.get("prompt", "")
             session_id = body.get("session_id", "default_session")
+            file_name = body.get("file_name")
+            file_content = body.get("file_content")
         else:
             form = await request.form()
             prompt = form.get("prompt", "")

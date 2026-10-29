@@ -459,16 +459,25 @@ export function Playground() {
     setSteps(prev => [...prev, newStep]);
 
     try {
-      const formData = new FormData();
-      formData.append("prompt", currentPrompt);
-      formData.append("session_id", activeSessionId ?? sessionId);
+      let fileName: string | null = null;
+      let fileContent: string | null = null;
+
       if (attachedFile) {
-        formData.append("file", attachedFile);
+        fileName = attachedFile.name;
+        fileContent = await attachedFile.text();
       }
 
       const res = await fetch(`${API_BASE_URL}/api/agent/run`, {
         method: "POST",
-        body: formData
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          prompt: currentPrompt,
+          session_id: activeSessionId ?? sessionId,
+          file_name: fileName,
+          file_content: fileContent
+        })
       });
 
       if (!res.ok || !res.body) {
