@@ -188,3 +188,33 @@ html, body, #root {
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(168, 85, 247, 0.85);
 }
+
+/* Execution Log panel — viewport-bounded with neon hover scrollbar */
+.execution-log-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #2e3d49 #0d0e15;
+}
+
+.execution-log-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.execution-log-container::-webkit-scrollbar-track {
+  background: #0d0e15;
+  border-radius: 3px;
+}
+
+.execution-log-container::-webkit-scrollbar-thumb {
+  background: #2e3d49;
+  border-radius: 3px;
+}
+
+.execution-log-container::-webkit-scrollbar-thumb:hover {
+  background: #00ffcc;
+}

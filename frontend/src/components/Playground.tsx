@@ -257,6 +257,9 @@ interface PromptBarProps {
   handleRun: (e?: React.FormEvent) => void;
   loading: boolean;
   placeholderText: string;
+  synthesisMode: "edit" | "new";
+  setSynthesisMode: (mode: "edit" | "new") => void;
+  hasFiles: boolean;
 }
 
 function PromptBar({
@@ -268,13 +271,53 @@ function PromptBar({
   handleFileChange,
   handleRun,
   loading,
-  placeholderText
+  placeholderText,
+  synthesisMode,
+  setSynthesisMode,
+  hasFiles,
 }: PromptBarProps) {
   return (
     <form onSubmit={handleRun} className="w-full relative group shrink-0">
       <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl blur opacity-35 group-hover:opacity-75 transition duration-500" />
       <div className="relative bg-zinc-950/90 border border-white/10 rounded-2xl p-3 flex flex-col gap-2 shadow-2xl">
         
+        {/* SYNTHESIS MODE BAR — only visible when files exist */}
+        {hasFiles && (
+          <div className="flex items-center gap-2 pb-1 border-b border-white/5">
+            <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold shrink-0">Mode:</span>
+            <div className="flex items-center gap-1 bg-zinc-900 rounded-lg p-0.5">
+              <button
+                type="button"
+                onClick={() => setSynthesisMode("edit")}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  synthesisMode === "edit"
+                    ? "bg-purple-600 text-white shadow"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                ✏️ Edit / Refactor Workspace
+              </button>
+              <button
+                type="button"
+                onClick={() => setSynthesisMode("new")}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  synthesisMode === "new"
+                    ? "bg-indigo-600 text-white shadow"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                ✨ New Synthesis
+              </button>
+            </div>
+            {synthesisMode === "edit" && (
+              <span className="text-[10px] text-purple-400 font-mono">Refactoring existing workspace</span>
+            )}
+            {synthesisMode === "new" && (
+              <span className="text-[10px] text-indigo-400 font-mono">Fresh generation — workspace will reset</span>
+            )}
+          </div>
+        )}
+
         {/* ATTACHED FILE CHIP */}
         {attachedFile && (
           <div className="flex items-center space-x-2 px-2.5 py-1 rounded-lg bg-purple-950/50 border border-purple-500/30 text-purple-300 text-xs w-fit">
@@ -345,6 +388,7 @@ export function Playground() {
   const [files, setFiles] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string>("");
   const [fileContent, setFileContent] = useState<string>("");
+  const [synthesisMode, setSynthesisMode] = useState<"edit" | "new">("new");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const logContainerRef = useRef<HTMLDivElement | null>(null);
@@ -374,6 +418,18 @@ export function Playground() {
     const currentPrompt = prompt;
     setPrompt("");
 
+    // If "New Synthesis" mode, reset workspace to a fresh session before running
+    const activeSessionId = synthesisMode === "new" ? (() => {
+      const freshId = `session_${Date.now()}`;
+      setSessionId(freshId);
+      setSteps([]);
+      setFiles([]);
+      setActiveFile("");
+      setFileContent("");
+      setTokens(0);
+      return freshId;
+    })() : sessionId;
+
     setLoading(true);
     
     const initialTool = attachedFile ? "analyze_codebase" : (steps.length > 0 ? "update_codebase" : "synthesize_codebase");
@@ -401,7 +457,7 @@ export function Playground() {
     try {
       const formData = new FormData();
       formData.append("prompt", currentPrompt);
-      formData.append("session_id", sessionId);
+      formData.append("session_id", activeSessionId ?? sessionId);
       if (attachedFile) {
         formData.append("file", attachedFile);
       }
@@ -433,6 +489,7 @@ export function Playground() {
 
       if (createdFiles.length > 0) {
         setFiles(createdFiles);
+        setSynthesisMode("edit"); // Auto-switch to Edit mode once files exist
         if (!activeFile || !createdFiles.includes(activeFile)) {
           selectFile(createdFiles[0]);
         } else {
@@ -464,6 +521,7 @@ export function Playground() {
     setActiveFile("");
     setFileContent("");
     setTokens(0);
+    setSynthesisMode("new");
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -537,6 +595,9 @@ export function Playground() {
                 handleRun={handleRun}
                 loading={loading}
                 placeholderText={placeholderText}
+                synthesisMode={synthesisMode}
+                setSynthesisMode={setSynthesisMode}
+                hasFiles={files.length > 0}
               />
             )}
           </div>
@@ -555,7 +616,7 @@ export function Playground() {
               ) : (
                 <div 
                   ref={logContainerRef}
-                  className="w-full flex-1 min-h-0 bg-zinc-950/70 border border-white/10 rounded-2xl p-4 flex flex-col gap-4 overflow-y-auto shadow-2xl custom-scrollbar"
+                  className="w-full flex-1 min-h-0 max-h-[calc(100vh-220px)] bg-zinc-950/70 border border-white/10 rounded-2xl p-4 flex flex-col gap-4 overflow-y-auto shadow-2xl custom-scrollbar"
                 >
                   <div className="text-xs font-semibold text-zinc-400 tracking-wider uppercase flex items-center justify-between shrink-0 sticky top-0 bg-zinc-950/90 py-1 z-10">
                     <span>Execution Log</span>
@@ -602,6 +663,9 @@ export function Playground() {
                   handleRun={handleRun}
                   loading={loading}
                   placeholderText={placeholderText}
+                  synthesisMode={synthesisMode}
+                  setSynthesisMode={setSynthesisMode}
+                  hasFiles={files.length > 0}
                 />
               </div>
             </div>

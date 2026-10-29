@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cyberpunk Synth Sequencer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <button id="playBtn">Play</button>
+  <label>BPM: <span id="bpmLabel">120</span></label>
+  <input type="range" id="bpmSlider" min="40" max="240" value="120">
+  <select id="presetSelect">
+    <option value="">--Preset--</option>
+    <option value="synthwave">Synthwave</option>
+    <option value="cyberpunk">Cyberpunk</option>
+  </select>
+</header>
+
+<canvas id="oscilloscope" width="800" height="200"></canvas>
+
+<section id="synthControls">
+  <label>Waveform:
+    <select id="waveformSelect">
+      <option value="sine">Sine</option>
+      <option value="square">Square</option>
+      <option value="sawtooth">Sawtooth</option>
+    </select>
+  </label>
+  <label>Attack:
+    <input type="range" id="attackSlider" min="0" max="1" step="0.01" value="0.01">
+  </label>
+  <label>Decay:
+    <input type="range" id="decaySlider" min="0" max="1" step="0.01" value="0.2">
+  </label>
+  <label>Filter Cutoff:
+    <input type="range" id="filterSlider" min="200" max="20000" step="1" value="8000">
+  </label>
+</section>
+
+<div id="sequencerGrid">
+  <div class="track" data-instrument="kick"><span>Kick</span></div>
+  <div class="track" data-instrument="snare"><span>Snare</span></div>
+  <div class="track" data-instrument="hihat"><span>Hi-Hat</span></div>
+  <div class="track" data-instrument="synth"><span>Synth</span></div>
+</div>
+
+<script src="synth.js" defer></script>
+<script src="sequencer.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Cyberpunk Space Shooter</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+    <div id="hud">
+        <div id="score">Score: 0</div>
+        <div id="wave">Wave: 0</div>
+        <div id="healthContainer">
+            <div id="healthBar"></div>
+        </div>
+        <div id="abilityCooldown">Ability Ready</div>
+        <div id="highScore">High Score: 0</div>
+    </div>
+
+    <div id="startScreen" class="modal">
+        <h1>CYBERPUNK SHOOTER</h1>
+        <button id="startButton">Start Game</button>
+    </div>
+
+    <div id="upgradeShop" class="modal hidden">
+        <h2>Upgrade Shop</h2>
+        <div class="shop-item">
+            <span>Attack Speed (+10%)</span>
+            <button data-upgrade="attackSpeed">Buy (500)</button>
+        </div>
+        <div class="shop-item">
+            <span>Shield (+20% HP)</span>
+            <button data-upgrade="shield">Buy (800)</button>
+        </div>
+        <div class="shop-item">
+            <span>Damage (+15%)</span>
+            <button data-upgrade="damage">Buy (700)</button>
+        </div>
+        <button id="continueButton">Continue</button>
+    </div>
+
+    <div id="gameOver" class="modal hidden">
+        <h1>Game Over</h1>
+        <p id="finalScore">Score: 0</p>
+        <button id="restartButton">Restart</button>
+    </div>
+
+    <script src="audio.js" defer></script>
+    <script src="game.js" defer></script>
+</body>
+</html>
