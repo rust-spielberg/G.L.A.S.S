@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from typing import Optional
 import os
@@ -9,12 +10,30 @@ from agent import GlassAgent, WORKSPACES_DIR
 
 app = FastAPI(title="G.L.A.S.S. API")
 
-# 1. Native, conflict-free FastAPI CORS middleware
+# 1. Trust Render reverse proxy headers (Prevents HTTPS protocol drops)
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
+
+# 2. Explicit CORS configuration
+ALLOWED_ORIGINS = [
+    "https://glass-ai-agent.netlify.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
+
+raw_origins = os.getenv("CORS_ORIGINS", "").strip()
+if raw_origins:
+    for o in raw_origins.split(","):
+        clean = o.strip()
+        if clean and clean not in ALLOWED_ORIGINS:
+            ALLOWED_ORIGINS.append(clean)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows requests from Netlify and local dev
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,  # Set False so browser never rejects wildcard or dynamic origin headers
+    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -22,8 +41,9 @@ app.add_middleware(
 def health_check():
     return {"status": "ok", "message": "G.L.A.S.S. backend service is live"}
 
-# 2. Agent Run Endpoint
+# 3. Dual-route binding to eliminate 307/308 redirects on OPTIONS preflights
 @app.post("/api/agent/run")
+@app.post("/api/agent/run/")
 async def run_agent(request: Request):
     try:
         content_type = request.headers.get("content-type", "")
@@ -56,7 +76,7 @@ async def run_agent(request: Request):
         )
 
     def event_stream():
-        # Immediate ping to keep Render socket alive during cold start
+        # Immediate ping byte to keep socket alive through Render proxy
         yield json.dumps({"type": "ping"}) + "\n"
         try:
             for event in agent.execute_stream(prompt=prompt, file_name=file_name, file_content=file_content):
@@ -74,7 +94,7 @@ async def run_agent(request: Request):
         }
     )
 
-# 3. Workspace File Management Endpoints
+# 4. Workspace endpoints with dual slash handling
 @app.get("/api/workspace/file/{filename:path}")
 def read_workspace_file(filename: str, session_id: str = "default_session"):
     try:
