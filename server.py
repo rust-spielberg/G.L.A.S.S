@@ -1,8 +1,7 @@
-from fastapi import FastAPI, Form, File, UploadFile, HTTPException, Request, Response
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from typing import Optional
-import shutil
 import os
 import json
 import zipfile
@@ -10,76 +9,20 @@ from agent import GlassAgent, WORKSPACES_DIR
 
 app = FastAPI(title="G.L.A.S.S. API")
 
-ALLOWED_ORIGINS = [
-    "https://glass-ai-agent.netlify.app",
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:3000",
-]
-
-raw_origins = os.getenv("CORS_ORIGINS", "").strip()
-if raw_origins:
-    for o in raw_origins.split(","):
-        clean = o.strip()
-        if clean and clean not in ALLOWED_ORIGINS:
-            ALLOWED_ORIGINS.append(clean)
-
-# =============================================================================
-# 1. GLOBAL CORS INTERCEPTOR (Handles OPTIONS preflights cleanly)
-# =============================================================================
-@app.middleware("http")
-async def cors_options_interceptor(request: Request, call_next):
-    origin = request.headers.get("origin", "https://glass-ai-agent.netlify.app")
-    
-    # Intercept preflight OPTIONS requests before body parsing/validation
-    if request.method == "OPTIONS":
-        response = Response(status_code=200)
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PUT, DELETE, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = request.headers.get("access-control-request-headers", "*")
-        return response
-
-    response = await call_next(request)
-    
-    # Ensure outgoing HTTP responses retain CORS origin headers
-    if "access-control-allow-origin" not in response.headers:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        
-    return response
-
+# 1. Native, conflict-free FastAPI CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=r"https?://.*",
+    allow_origins=["*"],  # Allows requests from Netlify and local dev
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE", "PATCH"],
+    allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"],
 )
 
-# =============================================================================
-# 2. GLOBAL EXCEPTION HANDLER (Ensures JSON errors always carry CORS headers)
-# =============================================================================
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    origin = request.headers.get("origin", "https://glass-ai-agent.netlify.app")
-    return JSONResponse(
-        status_code=500,
-        content={"status": "error", "message": f"Internal Server Error: {str(exc)}"},
-        headers={
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE, PATCH",
-            "Access-Control-Allow-Headers": "*",
-        }
-    )
+@app.get("/")
+def health_check():
+    return {"status": "ok", "message": "G.L.A.S.S. backend service is live"}
 
-# =============================================================================
-# 3. AGENT RUN ENDPOINT
-# =============================================================================
+# 2. Agent Run Endpoint
 @app.post("/api/agent/run")
 async def run_agent(request: Request):
     try:
@@ -107,25 +50,19 @@ async def run_agent(request: Request):
 
         agent = GlassAgent(session_id=session_id)
     except Exception as e:
-        origin = request.headers.get("origin", "https://glass-ai-agent.netlify.app")
         return JSONResponse(
-            status_code=500,
-            content={"status": "error", "message": f"Request Parsing Error: {str(e)}"},
-            headers={
-                "Access-Control-Allow-Origin": origin,
-                "Access-Control-Allow-Credentials": "true",
-            }
+            status_code=400,
+            content={"status": "error", "message": f"Request Parsing Error: {str(e)}"}
         )
 
     def event_stream():
-        # Immediate ping to establish HTTP 200 and prevent cold-start proxy timeouts
+        # Immediate ping to keep Render socket alive during cold start
         yield json.dumps({"type": "ping"}) + "\n"
         try:
             for event in agent.execute_stream(prompt=prompt, file_name=file_name, file_content=file_content):
                 yield json.dumps(event) + "\n"
         except Exception as e:
-            err = str(e)
-            yield json.dumps({"type": "error", "message": f"Synthesis Error: {err}"}) + "\n"
+            yield json.dumps({"type": "error", "message": f"Synthesis Error: {str(e)}"}) + "\n"
 
     return StreamingResponse(
         event_stream(),
@@ -137,9 +74,7 @@ async def run_agent(request: Request):
         }
     )
 
-# =============================================================================
-# 4. WORKSPACE ENDPOINTS
-# =============================================================================
+# 3. Workspace File Management Endpoints
 @app.get("/api/workspace/file/{filename:path}")
 def read_workspace_file(filename: str, session_id: str = "default_session"):
     try:
@@ -172,7 +107,3 @@ def download_workspace(session_id: str):
         filename=f"glass_workspace_{session_id}.zip",
         media_type="application/zip"
     )
-
-@app.get("/")
-def health_check():
-    return {"status": "ok", "message": "G.L.A.S.S. backend service is live"}
