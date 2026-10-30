@@ -515,8 +515,12 @@ export function Playground() {
             } else if (event.type === "completion") {
               setTokens(prev => prev + (event.tokens?.total || 0));
               if (event.files?.length > 0) {
-                finalFiles = event.files;
-                setFiles(event.files);
+                // Merge new files with existing files so index.html is NEVER lost on partial edits
+                setFiles(prevFiles => {
+                  const merged = Array.from(new Set([...prevFiles, ...event.files]));
+                  finalFiles = merged;
+                  return merged;
+                });
                 setSynthesisMode("edit");
               }
             } else if (event.type === "error") {
@@ -533,7 +537,8 @@ export function Playground() {
       // After stream completes, refresh cache and reload preview
       if (finalFiles.length > 0) {
         await ensureWorkspaceFilesLoaded(finalFiles, activeSessionId ?? sessionId, true);
-        selectFile(finalFiles[0], true);
+        const preferHtml = finalFiles.find(f => f.endsWith('.html')) || finalFiles[0];
+        selectFile(preferHtml, true);
       }
     } catch (err: any) {
       setSteps(prev => [
@@ -621,9 +626,12 @@ export function Playground() {
     // 1. Bundle CSS with failsafe HUD overlay pointer-events rules
     const cssFiles = files.filter(f => f.endsWith('.css'));
     let combinedCss = `
-      /* Canvas Layering & HUD Overlay Fix */
+      /* Canvas Layering & HUD Overlay Failsafes */
       .hud-overlay { pointer-events: none !important; }
-      .hud-overlay button, .modal-content, button, input, select { pointer-events: auto !important; }
+      .hud-overlay button, .modal-content, button, input, select { pointer-events: auto !important; cursor: pointer !important; }
+      #gameOverModal { position: fixed !important; inset: 0 !important; z-index: 9999 !important; }
+      #gameOverModal.hidden { display: none !important; }
+      #restartBtn { pointer-events: auto !important; cursor: pointer !important; z-index: 10000 !important; }
     `;
     for (const cf of cssFiles) {
       if (filesCache[cf]) combinedCss += `\n/* ${cf} */\n` + filesCache[cf];
@@ -639,6 +647,31 @@ export function Playground() {
           }
           return origAdd.call(this, type, listener, options);
         };
+
+        // Auto-focus window & canvas on load so Spacebar / Arrow controls respond immediately
+        window.addEventListener('load', function() {
+          window.focus();
+          if (document.body) document.body.focus();
+          var c = document.querySelector('canvas');
+          if (c) { c.focus(); }
+        });
+        window.addEventListener('mouseover', function() {
+          window.focus();
+        });
+
+        // AudioContext browser autoplay unlock shim
+        function unlockAudio() {
+          try {
+            if (window.AudioContext || window.webkitAudioContext) {
+              var ctx = window.audio || window.audioCtx;
+              if (ctx && ctx.state === 'suspended') {
+                ctx.resume();
+              }
+            }
+          } catch (e) {}
+        }
+        document.addEventListener('pointerdown', unlockAudio, { once: true });
+        document.addEventListener('keydown', unlockAudio, { once: true });
       })();
     </script>`;
 

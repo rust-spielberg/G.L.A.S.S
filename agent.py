@@ -240,10 +240,31 @@ class UniversalCodeVerifier:
         # 8. Universal State-to-View Synchronization Audit (Calculators, Tools, Games, Timers, Dashboards)
         defects.extend(cls._check_state_view_synchronization(files_map))
 
-        # 9. Topic Compliance Guard — catch completely off-topic outputs
+        # 9. HTML Markup & Content Integrity Audit (Prevents raw CSS / Markdown in index.html)
+        defects.extend(cls._check_html_integrity(files_map))
+
+        # 10. Topic Compliance Guard — catch completely off-topic outputs
         defects.extend(cls._check_topic_compliance(files_map, prompt or original_file_name or ""))
 
         return defects
+
+    @classmethod
+    def _check_html_integrity(cls, files_map: Dict[str, str]) -> List[str]:
+        """
+        Guarantees that index.html actually contains valid HTML markup and not
+        raw CSS, markdown prose, or conversational filler.
+        """
+        issues = []
+        for fname, content in files_map.items():
+            if fname.endswith((".html", ".htm")):
+                has_html_tags = bool(re.search(r'<(?:!doctype\s+html|html|head|body|div|canvas|main|section|script|style|p|button)[\s>]', content, re.IGNORECASE))
+                if not has_html_tags:
+                    issues.append(
+                        f"HTML Markup Integrity Error: File '{fname}' contains zero valid HTML tags. "
+                        f"It appears raw CSS or markdown prose was generated instead. "
+                        f"Every .html file MUST begin with '<!DOCTYPE html>' and contain valid HTML elements."
+                    )
+        return issues
 
     @classmethod
     def _check_topic_compliance(cls, files_map: Dict[str, str], prompt_hint: str) -> List[str]:
@@ -251,17 +272,26 @@ class UniversalCodeVerifier:
         Detects when the LLM generates output completely unrelated to the user's request.
         Extracts key domain nouns from prompt_hint (passed as original_file_name context)
         and checks if any appear in the generated code. Flags total topic mismatches.
-        This runs as a last-resort sanity check — catches the ~8% garbage-output cases.
+        Bypasses during edit and bugfix requests to prevent false positives.
         """
-        # This check only runs when a prompt hint is available
         if not prompt_hint or len(prompt_hint.strip()) < 5:
+            return []
+
+        prompt_lower = prompt_hint.lower()
+
+        # If the user is asking to fix a bug, edit, tweak, or update, bypass topic check
+        is_bugfix_or_edit = any(k in prompt_lower for k in [
+            "fix", "bug", "broken", "error", "issue", "problem", "not working", "fails", "failed",
+            "white screen", "blank", "freeze", "frozen", "update", "change", "modify",
+            "tweak", "adjust", "improve", "refactor", "repair"
+        ])
+        if is_bugfix_or_edit:
             return []
 
         issues = []
         combined_output = " ".join(files_map.values()).lower()
-        prompt_lower = prompt_hint.lower()
 
-        # Extract meaningful domain keywords (3+ char words, skip common stop words)
+        # Extract meaningful domain keywords (3+ char words, skip common stop words & meta terms)
         STOP_WORDS = {
             "the", "and", "for", "with", "that", "this", "from", "are", "was",
             "will", "can", "use", "make", "create", "build", "generate", "write",
@@ -269,6 +299,10 @@ class UniversalCodeVerifier:
             "have", "has", "had", "but", "not", "just", "like", "very", "more",
             "should", "must", "need", "want", "please", "using", "index", "html",
             "css", "file", "code", "app", "web", "page", "style", "script",
+            "fix", "fixes", "bug", "bugs", "error", "errors", "issue", "issues",
+            "problem", "problems", "working", "work", "works", "screen", "button",
+            "play", "again", "still", "now", "tried", "tries", "gave", "told",
+            "what", "where", "there", "some", "another", "change", "update", "modify"
         }
         words = re.findall(r'\b[a-z][a-z0-9]{2,}\b', prompt_lower)
         key_terms = [w for w in words if w not in STOP_WORDS]
@@ -674,6 +708,44 @@ class CodeExtractor:
             return "main.go"
         return f"file_{idx}.txt"
 
+    @staticmethod
+    def normalize_filename(filename: str, code_str: str) -> str:
+        """
+        Normalizes filenames and corrects content-type mismatches:
+        - Resolves dot-only filenames (e.g. '.css' -> 'style.css')
+        - Auto-redirects raw CSS mislabeled as index.html to style.css
+        - Auto-redirects HTML markup mislabeled as style.css to index.html
+        """
+        filename = filename.strip()
+        filename = re.sub(r'[\'\"\)\]\>]+$', '', filename)
+        filename = re.sub(r'^[\'\"\(\[\<]+', '', filename)
+
+        # 1. Normalize dot-only filenames like .css, .js, .html
+        if filename.startswith('.'):
+            ext = filename[1:].lower()
+            if ext in ['css']:
+                filename = 'style.css'
+            elif ext in ['js', 'javascript']:
+                filename = 'script.js'
+            elif ext in ['html', 'htm']:
+                filename = 'index.html'
+            elif ext in ['py', 'python']:
+                filename = 'main.py'
+
+        # 2. Content-Aware Type Correction
+        has_html_tags = bool(re.search(r'<(?:!doctype\s+html|html|head|body|div|canvas|main|section|script|style|p|button)[\s>]', code_str, re.IGNORECASE))
+        has_css_indicators = (
+            bool(re.search(r'(?:^|\n)\s*(?:html|body|#gameCanvas|\.[\w\-]+|#[\w\-]+|\*)\s*\{', code_str))
+            or ("margin:" in code_str and "padding:" in code_str and "{" in code_str)
+        )
+
+        if filename.endswith(('.html', '.htm')) and not has_html_tags and has_css_indicators:
+            filename = 'style.css'
+        elif filename.endswith(('.css', '.txt')) and has_html_tags and ("<!doctype" in code_str.lower() or "<html" in code_str.lower()):
+            filename = 'index.html'
+
+        return filename
+
     @classmethod
     def parse_response(cls, llm_text: str, prompt: str, default_filename: str = "") -> List[Tuple[str, str]]:
         pattern = r"```(?:([\w\+\-#]+))?(?::|\s+)?([\w\.\-/]+)?\n(.*?)```"
@@ -689,8 +761,10 @@ class CodeExtractor:
             if lang_clean in cls.CLI_LANGUAGES:
                 continue
 
-            # Strip accidental markdown headers inside code blocks
-            code_str = re.sub(r"^(?:#+|\*\*).*?\n", "", code_str).strip()
+            # Strip accidental markdown code prefixes like ```css, ### filename, **File: ...**
+            code_str = re.sub(r'^(?:#+|\*\*|File:?|Filename:?).*?\n', '', code_str, flags=re.IGNORECASE).strip()
+            code_str = re.sub(r'^```[\w\-]*\n', '', code_str).strip()
+            code_str = re.sub(r'```$', '', code_str).strip()
 
             if not code_str:
                 continue
@@ -698,8 +772,8 @@ class CodeExtractor:
             filename = match_file.strip() if match_file else ""
             
             if not filename:
-                first_line = code_str.split("\n")[0]
-                comment_match = re.search(r"(?:#|//|<!--)\s*(?:file:)?\s*([\w\.\-]+\.\w+)", first_line, re.IGNORECASE)
+                first_lines = "\n".join(code_str.split("\n")[:3])
+                comment_match = re.search(r"(?:#|//|<!--|/\*)\s*(?:file:)?\s*([\w\.\-]+\.\w+)", first_lines, re.IGNORECASE)
                 if comment_match:
                     filename = comment_match.group(1)
 
@@ -708,6 +782,8 @@ class CodeExtractor:
 
             if not filename and default_filename:
                 filename = default_filename
+
+            filename = cls.normalize_filename(filename, code_str)
 
             base_name, ext = os.path.splitext(filename)
             counter = 1
@@ -731,6 +807,7 @@ class CodeExtractor:
                 t_lang_clean = t_lang.lower().strip() if t_lang else ""
                 if t_code and t_lang_clean not in cls.CLI_LANGUAGES:
                     t_fname = t_fname.strip() if t_fname else cls.infer_filename_by_lang(t_lang or "", len(extracted) + 1)
+                    t_fname = cls.normalize_filename(t_fname, t_code)
                     if t_fname and t_fname not in used_filenames:
                         extracted.append((t_fname, t_code))
 
@@ -740,12 +817,20 @@ class CodeExtractor:
             
             # Content-aware and prompt-aware fallback detection:
             prompt_lower = prompt.lower()
-            if "<!doctype html" in clean_code.lower() or "<html" in clean_code.lower() or "index.html" in prompt_lower or "html" in prompt_lower or "web" in prompt_lower:
+            has_html_tags = bool(re.search(r'<(?:!doctype\s+html|html|head|body|div|canvas|main|section|script|style|p|button)[\s>]', clean_code, re.IGNORECASE))
+            has_css_indicators = bool(re.search(r'(?:^|\n)\s*(?:html|body|#[\w\-]+|\.[\w\-]+|\*)\s*\{', clean_code))
+
+            if has_html_tags or "<!doctype html" in clean_code.lower() or "<html" in clean_code.lower():
+                fallback = "index.html"
+            elif has_css_indicators and not has_html_tags:
+                fallback = "style.css"
+            elif "index.html" in prompt_lower or "html" in prompt_lower or "web" in prompt_lower:
                 fallback = "index.html"
             elif default_filename:
                 fallback = default_filename
             else:
                 fallback = "main.py"
+            fallback = cls.normalize_filename(fallback, clean_code)
             extracted.append((fallback, clean_code))
             
         return extracted
@@ -1063,6 +1148,12 @@ class GlassAgent:
             "content": summary
         })
 
+        all_workspace_files = self.workspace.list_files()
+        combined_file_list = []
+        for f in created_paths + all_workspace_files:
+            if f not in combined_file_list:
+                combined_file_list.append(f)
+
         return {
             "status": "success",
             "engine": engine_used,
@@ -1072,7 +1163,7 @@ class GlassAgent:
                 "total": accumulated_tokens + len(prompt.split()) * 4 + 20
             },
             "steps": steps,
-            "files": created_paths
+            "files": combined_file_list
         }
 
     def execute_stream(self, prompt: str, file_name: Optional[str] = None, file_content: Optional[str] = None):
@@ -1316,10 +1407,16 @@ class GlassAgent:
             step_counter += 1
 
         # ── Final completion event ──
+        all_workspace_files = self.workspace.list_files()
+        combined_file_list = []
+        for f in created_paths + all_workspace_files:
+            if f not in combined_file_list:
+                combined_file_list.append(f)
+
         summary = f"Synthesis complete. Generated files: [{', '.join(created_paths)}] using {engine_used}."
         yield {
             "type": "completion",
-            "files": created_paths,
+            "files": combined_file_list,
             "tokens": {
                 "prompt": len(prompt.split()) * 4 + 20,
                 "completion": accumulated_tokens,
