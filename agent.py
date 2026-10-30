@@ -124,7 +124,7 @@ class UniversalCodeVerifier:
         return issues
 
     @classmethod
-    def audit_codebase(cls, files_map: Dict[str, str], original_file_name: Optional[str] = None) -> List[str]:
+    def audit_codebase(cls, files_map: Dict[str, str], original_file_name: Optional[str] = None, prompt: str = "") -> List[str]:
         defects = []
 
         if not files_map:
@@ -237,7 +237,57 @@ class UniversalCodeVerifier:
         # 7. Universal Interaction Completeness Audit
         defects.extend(cls._check_interaction_completeness(files_map))
 
+        # 8. Topic Compliance Guard — catch completely off-topic outputs
+        defects.extend(cls._check_topic_compliance(files_map, prompt or original_file_name or ""))
+
         return defects
+
+    @classmethod
+    def _check_topic_compliance(cls, files_map: Dict[str, str], prompt_hint: str) -> List[str]:
+        """
+        Detects when the LLM generates output completely unrelated to the user's request.
+        Extracts key domain nouns from prompt_hint (passed as original_file_name context)
+        and checks if any appear in the generated code. Flags total topic mismatches.
+        This runs as a last-resort sanity check — catches the ~8% garbage-output cases.
+        """
+        # This check only runs when a prompt hint is available
+        if not prompt_hint or len(prompt_hint.strip()) < 5:
+            return []
+
+        issues = []
+        combined_output = " ".join(files_map.values()).lower()
+        prompt_lower = prompt_hint.lower()
+
+        # Extract meaningful domain keywords (3+ char words, skip common stop words)
+        STOP_WORDS = {
+            "the", "and", "for", "with", "that", "this", "from", "are", "was",
+            "will", "can", "use", "make", "create", "build", "generate", "write",
+            "add", "all", "any", "its", "you", "your", "our", "also", "into",
+            "have", "has", "had", "but", "not", "just", "like", "very", "more",
+            "should", "must", "need", "want", "please", "using", "index", "html",
+            "css", "file", "code", "app", "web", "page", "style", "script",
+        }
+        words = re.findall(r'\b[a-z][a-z0-9]{2,}\b', prompt_lower)
+        key_terms = [w for w in words if w not in STOP_WORDS]
+
+        if not key_terms:
+            return []
+
+        # Count how many key terms appear in the generated output
+        matched = sum(1 for term in key_terms if term in combined_output)
+        match_ratio = matched / len(key_terms)
+
+        # If fewer than 15% of the key terms from the prompt appear in the output → off-topic
+        if match_ratio < 0.15 and len(key_terms) >= 4:
+            unmatched = [t for t in key_terms if t not in combined_output][:6]
+            issues.append(
+                f"Topic Compliance Failure: Generated code appears unrelated to the user's request. "
+                f"Only {matched}/{len(key_terms)} prompt keywords found in output. "
+                f"Missing key terms: {', '.join(unmatched)}. "
+                f"Re-read the original task and generate code that directly implements what was requested."
+            )
+
+        return issues
 
     @classmethod
     def _check_interaction_completeness(cls, files_map: Dict[str, str]) -> List[str]:
@@ -625,7 +675,7 @@ class GlassAgent:
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt}
                         ],
-                        temperature=0.1,
+                        temperature=0.07,
                         max_tokens=8192
                     )
                     content = resp.choices[0].message.content
@@ -651,7 +701,7 @@ class GlassAgent:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
-                    temperature=0.1,
+                    temperature=0.07,
                     max_tokens=8192
                 )
                 content = resp.choices[0].message.content
@@ -720,38 +770,55 @@ class GlassAgent:
             "   - Initialization Call: If you define an init(), start(), main(), startGame(), setup(), or boot() function, you MUST call it at the very bottom of the script — outside any event listener. Apps that define but never call their entry point load as blank screens."
         )
 
-        # Build initial prompt with uploaded file content or existing workspace context
-        context_parts = []
+        # Build initial prompt — Task-first structure + edit context cap + edit mode label
+        # PRIMARY OBJECTIVE always goes first so the model anchors on it from token 1
+        task_header = (
+            f"🎯 PRIMARY OBJECTIVE (read this first and implement exactly):\n{prompt}\n"
+            f"{'=' * 60}"
+        )
+
+        context_parts = [task_header]
+
         if file_content and file_name:
             context_parts.append(f"ATTACHED FILE `{file_name}` TO AUDIT/UPDATE:\n```{file_name}\n{file_content}\n```")
         elif not file_content:
             prompt_lower = prompt.lower()
             is_new_request = any(k in prompt_lower for k in ["make", "create", "build", "generate", "new", "index.html", "write a", "scientific calculator"])
-            
-            # Only inject existing workspace files if the user is explicitly refining/editing existing code
+
+            # Only inject existing workspace files if the user is refining/editing existing code
             if not is_new_request:
                 existing_files = self.workspace.list_files()
                 if existing_files:
                     loaded_context = []
-                    for ef in existing_files[:4]:  # Include up to 4 primary existing workspace files
+                    for ef in existing_files[:4]:
                         try:
                             content = self.workspace.read_file(ef)
+                            # Cap each file at 4000 chars to prevent context overflow on repeated edits
+                            if len(content) > 4000:
+                                content = content[:4000] + f"\n... [truncated for context efficiency — {len(content) - 4000} chars remaining]"
                             loaded_context.append(f"CURRENT WORKSPACE FILE `{ef}`:\n```{ef}\n{content}\n```")
                         except Exception:
                             pass
                     if loaded_context:
-                        context_parts.append("EXISTING WORKSPACE CONTEXT:\n" + "\n\n".join(loaded_context))
+                        edit_mode_header = (
+                            "╔══════════════════════════════════════════════════════╗\n"
+                            "║  EDIT MODE — DO NOT REWRITE FROM SCRATCH             ║\n"
+                            "║  Modify ONLY what the PRIMARY OBJECTIVE requests.    ║\n"
+                            "║  Keep all existing logic, styles, and structure.     ║\n"
+                            "╚══════════════════════════════════════════════════════╝"
+                        )
+                        context_parts.append(edit_mode_header + "\n\nEXISTING WORKSPACE FILES TO MODIFY:\n" + "\n\n".join(loaded_context))
 
-        # Anchor user task specification with strict execution reminders at the bottom
+        # Execution mandate + task repeated at bottom (combat Lost-in-the-Middle attention drop)
         context_parts.append(
-            f"USER TASK SPECIFICATION (READ EVERY REQUIREMENT THOROUGHLY):\n{prompt}\n\n"
-            "=======================================================\n"
-            "CRITICAL EXECUTION MANDATE FOR THE ABOVE SPECIFICATION:\n"
-            "1. Read and fulfill 100% of all detailed requirements described above.\n"
-            "2. If web/HTML/calculator was requested, produce `index.html`, `style.css`, and `script.js`.\n"
-            "3. DO NOT substitute requested web files with Python (`main.py`).\n"
-            "4. Return COMPLETE, fully implemented code blocks without placeholders.\n"
-            "======================================================="
+            f"=======================================================\n"
+            f"CRITICAL EXECUTION MANDATE — IMPLEMENT THE PRIMARY OBJECTIVE:\n"
+            f"OBJECTIVE REMINDER: {prompt}\n"
+            f"1. Read and fulfill 100% of all detailed requirements in the PRIMARY OBJECTIVE above.\n"
+            f"2. If web/HTML/calculator was requested, produce `index.html`, `style.css`, and `script.js`.\n"
+            f"3. DO NOT substitute requested web files with Python (`main.py`).\n"
+            f"4. Return COMPLETE, fully implemented code blocks without placeholders.\n"
+            f"======================================================="
         )
         initial_prompt = "\n\n".join(context_parts)
         current_prompt = initial_prompt
@@ -771,7 +838,7 @@ class GlassAgent:
             sanitized_dict = CodeSanitizer.sanitize(files_dict)
 
             # ── Priority 1: Functional & Code Audit ──
-            functional_defects = UniversalCodeVerifier.audit_codebase(sanitized_dict, original_file_name=file_name)
+            functional_defects = UniversalCodeVerifier.audit_codebase(sanitized_dict, original_file_name=file_name, prompt=prompt)
 
             # ── Priority 2: UI/UX Guardrail Audit (runs only after functional pass or alongside) ──
             ui_ux_flaws = UIUXGuardrailInspector.audit_uiux(sanitized_dict)
@@ -932,14 +999,20 @@ class GlassAgent:
             }
         }
 
-        # ── Build initial context (same logic as execute()) ──
-        context_parts = []
+        # ── Build initial context — Task-first structure (mirrors execute() logic) ──
+        task_header = (
+            f"🎯 PRIMARY OBJECTIVE (read this first and implement exactly):\n{prompt}\n"
+            f"{'=' * 60}"
+        )
+
+        context_parts = [task_header]
+
         if file_content and file_name:
             context_parts.append(f"ATTACHED FILE `{file_name}` TO AUDIT/UPDATE:\n```{file_name}\n{file_content}\n```")
         elif not file_content:
             prompt_lower = prompt.lower()
             is_new_request = any(k in prompt_lower for k in ["make", "create", "build", "generate", "new", "index.html", "write a", "scientific calculator"])
-            
+
             # Only inject existing workspace files if the user is explicitly refining/editing existing code
             if not is_new_request:
                 existing_files = self.workspace.list_files()
@@ -948,22 +1021,32 @@ class GlassAgent:
                     for ef in existing_files[:4]:
                         try:
                             content = self.workspace.read_file(ef)
+                            # Cap each file at 4000 chars to prevent context overflow on repeated edits
+                            if len(content) > 4000:
+                                content = content[:4000] + f"\n... [truncated for context efficiency — {len(content) - 4000} chars remaining]"
                             loaded_context.append(f"CURRENT WORKSPACE FILE `{ef}`:\n```{ef}\n{content}\n```")
                         except Exception:
                             pass
                     if loaded_context:
-                        context_parts.append("EXISTING WORKSPACE CONTEXT:\n" + "\n\n".join(loaded_context))
+                        edit_mode_header = (
+                            "╔══════════════════════════════════════════════════════╗\n"
+                            "║  EDIT MODE — DO NOT REWRITE FROM SCRATCH             ║\n"
+                            "║  Modify ONLY what the PRIMARY OBJECTIVE requests.    ║\n"
+                            "║  Keep all existing logic, styles, and structure.     ║\n"
+                            "╚══════════════════════════════════════════════════════╝"
+                        )
+                        context_parts.append(edit_mode_header + "\n\nEXISTING WORKSPACE FILES TO MODIFY:\n" + "\n\n".join(loaded_context))
 
-        # Anchor user task specification with strict execution reminders at the bottom
+        # Execution mandate + task repeated at bottom (combat Lost-in-the-Middle attention drop)
         context_parts.append(
-            f"USER TASK SPECIFICATION (READ EVERY REQUIREMENT THOROUGHLY):\n{prompt}\n\n"
-            "=======================================================\n"
-            "CRITICAL EXECUTION MANDATE FOR THE ABOVE SPECIFICATION:\n"
-            "1. Read and fulfill 100% of all detailed requirements described above.\n"
-            "2. If web/HTML/calculator was requested, produce `index.html`, `style.css`, and `script.js`.\n"
-            "3. DO NOT substitute requested web files with Python (`main.py`).\n"
-            "4. Return COMPLETE, fully implemented code blocks without placeholders.\n"
-            "======================================================="
+            f"=======================================================\n"
+            f"CRITICAL EXECUTION MANDATE — IMPLEMENT THE PRIMARY OBJECTIVE:\n"
+            f"OBJECTIVE REMINDER: {prompt}\n"
+            f"1. Read and fulfill 100% of all detailed requirements in the PRIMARY OBJECTIVE above.\n"
+            f"2. If web/HTML/calculator was requested, produce `index.html`, `style.css`, and `script.js`.\n"
+            f"3. DO NOT substitute requested web files with Python (`main.py`).\n"
+            f"4. Return COMPLETE, fully implemented code blocks without placeholders.\n"
+            f"======================================================="
         )
         initial_prompt = "\n\n".join(context_parts)
         current_prompt = initial_prompt
@@ -988,7 +1071,7 @@ class GlassAgent:
             sanitized_dict = CodeSanitizer.sanitize(files_dict)
 
             # ── Priority 1: Functional & Code Audit ──
-            functional_defects = UniversalCodeVerifier.audit_codebase(sanitized_dict, original_file_name=file_name)
+            functional_defects = UniversalCodeVerifier.audit_codebase(sanitized_dict, original_file_name=file_name, prompt=prompt)
 
             # ── Priority 2: UI/UX Guardrail Audit (secondary layer) ──
             ui_ux_flaws = UIUXGuardrailInspector.audit_uiux(sanitized_dict)
