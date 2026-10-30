@@ -237,7 +237,10 @@ class UniversalCodeVerifier:
         # 7. Universal Interaction Completeness Audit
         defects.extend(cls._check_interaction_completeness(files_map))
 
-        # 8. Topic Compliance Guard — catch completely off-topic outputs
+        # 8. Universal State-to-View Synchronization Audit (Calculators, Tools, Games, Timers, Dashboards)
+        defects.extend(cls._check_state_view_synchronization(files_map))
+
+        # 9. Topic Compliance Guard — catch completely off-topic outputs
         defects.extend(cls._check_topic_compliance(files_map, prompt or original_file_name or ""))
 
         return defects
@@ -412,6 +415,108 @@ class UniversalCodeVerifier:
                     f"The application will load as a blank screen. "
                     f"Add '{fn_name}();' at the bottom of the script to initialize and start the app."
                 )
+
+        return issues
+
+    @classmethod
+    def _check_state_view_synchronization(cls, files_map: Dict[str, str]) -> List[str]:
+        """
+        Universal State-to-View Synchronization Audit.
+        Applies to ALL software types (Calculators, Games, Timers, Todo/Productivity Tools, Dashboards).
+        Guarantees that when user triggers state-changing actions (clear, reset, restart, calculate, add):
+        1. View elements (DOM screen, canvas loop, or interval) are visually refreshed.
+        2. Buttons with specific IDs have corresponding interactive handlers.
+        3. Canvas game restart loops re-invoke requestAnimationFrame to prevent frozen screens.
+        """
+        issues = []
+        html_content = ""
+        js_content = ""
+        has_html = False
+
+        for fname, content in files_map.items():
+            if fname.endswith(".html"):
+                html_content += content + "\n"
+                has_html = True
+            if fname.endswith(".js"):
+                js_content += content + "\n"
+
+        if not has_html:
+            return issues
+
+        inline_scripts = re.findall(r"<script[^>]*>(.*?)</script>", html_content, re.DOTALL | re.IGNORECASE)
+        combined_js = js_content + "\n".join(inline_scripts)
+        combined_lower = combined_js.lower()
+
+        # 1. Inspect named action buttons in HTML to ensure they are referenced in JS
+        button_id_matches = re.findall(r'<button[^>]+id=["\']([\w\-]+)["\']', html_content, re.IGNORECASE)
+        for btn_id in button_id_matches:
+            # Skip if button has an inline onclick
+            has_inline = bool(re.search(rf'<button[^>]+id=["\']{re.escape(btn_id)}["\'][^>]*onclick', html_content, re.IGNORECASE))
+            if not has_inline:
+                is_referenced = (
+                    f"'{btn_id}'" in combined_js
+                    or f'"{btn_id}"' in combined_js
+                    or f"#{btn_id}" in combined_js
+                )
+                if not is_referenced and "querySelectorAll" not in combined_js and "addEventListener" in combined_js:
+                    issues.append(
+                        f"Unbound Interactive Element: Button with id='{btn_id}' is defined in HTML "
+                        f"but never referenced or bound to an event listener in JavaScript. "
+                        f"Bind document.getElementById('{btn_id}').addEventListener('click', handler)."
+                    )
+
+        # 2. State-to-View Refresh in DOM apps (Calculators, Timers, Forms, Data tools)
+        has_calc_or_tool = any(k in html_content.lower() for k in ["calculator", "stopwatch", "timer", "counter", "todo", "converter"])
+        has_reset_or_clear = any(k in combined_lower for k in ["clear", "reset", "calculate", "addeventlistener('click'"])
+        if has_calc_or_tool and has_reset_or_clear:
+            updates_dom = any(k in combined_js for k in [
+                ".value =", ".value+=", ".value=",
+                ".textContent =", ".textContent=",
+                ".innerText =", ".innerText=",
+                ".innerHTML =", ".innerHTML=",
+                "updateDisplay", "render", "display"
+            ])
+            if not updates_dom:
+                issues.append(
+                    "State-to-View Disconnect: Interactive application modifies state variables, "
+                    "but no DOM display synchronization was detected (e.g., updating display.value, "
+                    "element.textContent, or calling a render/update function). "
+                    "Users will see an unresponsive UI where clicking buttons fails to change the screen."
+                )
+
+        # 3. Canvas Game Lifecycle & Restart Loop Continuity
+        is_canvas_game = "getContext(" in combined_js and "requestAnimationFrame" in combined_js
+        has_game_over = any(k in combined_lower for k in ["gameover", "isgameover", "game_over", "gameended", "playerdead"])
+        has_restart_action = any(k in (combined_lower + html_content.lower()) for k in ["play again", "playagain", "restart", "retry", "reset"])
+
+        if is_canvas_game and has_game_over and has_restart_action:
+            # Check if restart handler re-invokes animation loop
+            restart_fn_match = re.search(
+                r'function\s+(?:restart|reset|playAgain|initGame|startGame)[^{]*\{([^}]+)\}',
+                combined_js,
+                re.IGNORECASE
+            )
+            if restart_fn_match:
+                fn_body = restart_fn_match.group(1)
+                restarts_loop = (
+                    "requestAnimationFrame" in fn_body
+                    or any(k in fn_body for k in ["loop(", "gameLoop(", "animate(", "update(", "draw("])
+                )
+                if not restarts_loop:
+                    issues.append(
+                        "Game Lifecycle Defect: Canvas game has a game-over state and restart/play-again button, "
+                        "but the restart function does NOT re-launch the animation loop (missing requestAnimationFrame). "
+                        "When the player clicks 'Play Again', the game will freeze on a dead screen with score 0. "
+                        "Call requestAnimationFrame(gameLoop) (or your main animation function) inside the restart handler."
+                    )
+
+        # 4. Timer/Interval Safety & Continuity
+        if "setinterval" in combined_lower and not any(k in combined_lower for k in ["clearinterval", "timer", "interval"]):
+            issues.append(
+                "Timer Leak Defect: setInterval is scheduled without interval tracking or clearInterval. "
+                "Ensure timer IDs are stored in variables (e.g. timerId = setInterval(...)) and properly "
+                "cleared on reset or stop to prevent runaway loops."
+            )
 
         return issues
 
@@ -767,7 +872,12 @@ class GlassAgent:
             "   - Form Handlers: Every <form> MUST have a submit handler with event.preventDefault() to prevent page reload.\n"
             "   - Keyboard Events: For ANY app with keyboard-driven interaction (calculators, games, terminals, text editors, quiz apps, drawing tools), you MUST implement document.addEventListener('keydown', handler) with COMPLETE key mapping covering all relevant keys. NEVER bind keyboard events to a <div> or <canvas> — they are not focusable. Always bind to document or window.\n"
             "   - Slider & Dropdown Handlers: Every <input type='range'> and <select> element MUST have an input or change event listener that updates the UI or state in real-time.\n"
-            "   - Initialization Call: If you define an init(), start(), main(), startGame(), setup(), or boot() function, you MUST call it at the very bottom of the script — outside any event listener. Apps that define but never call their entry point load as blank screens."
+            "   - Initialization Call: If you define an init(), start(), main(), startGame(), setup(), or boot() function, you MUST call it at the very bottom of the script — outside any event listener. Apps that define but never call their entry point load as blank screens.\n"
+            "14. UNIVERSAL STATE-TO-VIEW INTEGRITY & RESTART LIFECYCLE (First-Shot Runtime Standard):\n"
+            "   - State-to-View Refresh: Every user action that modifies data or state (calculating, clearing, adding, deleting, resetting, sorting, toggling) MUST immediately update the visible DOM interface (e.g. updating display.value, element.textContent, or calling a render/display function). Never update internal variables in memory without visibly updating the UI.\n"
+            "   - Button Binding Guarantee: Every interactive button defined in HTML MUST be bound to a functional event listener in JavaScript. Never leave buttons unreferenced or inert.\n"
+            "   - Game & Animation Loops: If an application has an animation loop or game over state with a 'Play Again' / 'Restart' button, the restart function MUST reset all variables AND explicitly re-launch the animation loop via requestAnimationFrame(gameLoop). The restart button overlay MUST have 'pointer-events: auto' and 'z-index: 1000' so clicks register instantly.\n"
+            "   - Timers & Intervals: Always track setInterval IDs in variables and clear them via clearInterval on reset or stop to prevent frozen or duplicate timers."
         )
 
         # Build initial prompt — Task-first structure + edit context cap + edit mode label
@@ -783,28 +893,46 @@ class GlassAgent:
             context_parts.append(f"ATTACHED FILE `{file_name}` TO AUDIT/UPDATE:\n```{file_name}\n{file_content}\n```")
         elif not file_content:
             prompt_lower = prompt.lower()
-            is_new_request = any(k in prompt_lower for k in ["make", "create", "build", "generate", "new", "index.html", "write a", "scientific calculator"])
+            reset_intent_keywords = [
+                "make", "create", "build", "generate", "new", "index.html", "write a", "scientific calculator",
+                "where is", "where's", "bring back", "redo", "restart", "start over", "i asked for", "rebuild"
+            ]
+            is_new_request = any(k in prompt_lower for k in reset_intent_keywords)
 
             # Only inject existing workspace files if the user is refining/editing existing code
             if not is_new_request:
                 existing_files = self.workspace.list_files()
                 if existing_files:
+                    # Detect current application identity to lock context
+                    app_identity = ""
+                    for ef in existing_files:
+                        if ef.endswith(".html"):
+                            try:
+                                h_content = self.workspace.read_file(ef)
+                                title_match = re.search(r'<title>(.*?)</title>', h_content, re.IGNORECASE)
+                                if title_match:
+                                    app_identity = title_match.group(1).strip()
+                                    break
+                            except Exception:
+                                pass
+
                     loaded_context = []
                     for ef in existing_files[:4]:
                         try:
                             content = self.workspace.read_file(ef)
-                            # Cap each file at 4000 chars to prevent context overflow on repeated edits
-                            if len(content) > 4000:
-                                content = content[:4000] + f"\n... [truncated for context efficiency — {len(content) - 4000} chars remaining]"
+                            # Full file visibility — no partial truncation so AI never loses context
                             loaded_context.append(f"CURRENT WORKSPACE FILE `{ef}`:\n```{ef}\n{content}\n```")
                         except Exception:
                             pass
                     if loaded_context:
+                        identity_line = f"║  TARGET APPLICATION: {app_identity[:40].upper():<40} ║\n" if app_identity else ""
                         edit_mode_header = (
                             "╔══════════════════════════════════════════════════════╗\n"
                             "║  EDIT MODE — DO NOT REWRITE FROM SCRATCH             ║\n"
+                            + identity_line +
                             "║  Modify ONLY what the PRIMARY OBJECTIVE requests.    ║\n"
                             "║  Keep all existing logic, styles, and structure.     ║\n"
+                            "║  DO NOT change application genre or core functionality.║\n"
                             "╚══════════════════════════════════════════════════════╝"
                         )
                         context_parts.append(edit_mode_header + "\n\nEXISTING WORKSPACE FILES TO MODIFY:\n" + "\n\n".join(loaded_context))
@@ -984,7 +1112,12 @@ class GlassAgent:
             "   - Form Handlers: Every <form> MUST have a submit handler with event.preventDefault() to prevent page reload.\n"
             "   - Keyboard Events: For ANY app with keyboard-driven interaction (calculators, games, terminals, text editors, quiz apps, drawing tools), you MUST implement document.addEventListener('keydown', handler) with COMPLETE key mapping covering all relevant keys. NEVER bind keyboard events to a <div> or <canvas> — they are not focusable. Always bind to document or window.\n"
             "   - Slider & Dropdown Handlers: Every <input type='range'> and <select> element MUST have an input or change event listener that updates the UI or state in real-time.\n"
-            "   - Initialization Call: If you define an init(), start(), main(), startGame(), setup(), or boot() function, you MUST call it at the very bottom of the script — outside any event listener. Apps that define but never call their entry point load as blank screens."
+            "   - Initialization Call: If you define an init(), start(), main(), startGame(), setup(), or boot() function, you MUST call it at the very bottom of the script — outside any event listener. Apps that define but never call their entry point load as blank screens.\n"
+            "14. UNIVERSAL STATE-TO-VIEW INTEGRITY & RESTART LIFECYCLE (First-Shot Runtime Standard):\n"
+            "   - State-to-View Refresh: Every user action that modifies data or state (calculating, clearing, adding, deleting, resetting, sorting, toggling) MUST immediately update the visible DOM interface (e.g. updating display.value, element.textContent, or calling a render/display function). Never update internal variables in memory without visibly updating the UI.\n"
+            "   - Button Binding Guarantee: Every interactive button defined in HTML MUST be bound to a functional event listener in JavaScript. Never leave buttons unreferenced or inert.\n"
+            "   - Game & Animation Loops: If an application has an animation loop or game over state with a 'Play Again' / 'Restart' button, the restart function MUST reset all variables AND explicitly re-launch the animation loop via requestAnimationFrame(gameLoop). The restart button overlay MUST have 'pointer-events: auto' and 'z-index: 1000' so clicks register instantly.\n"
+            "   - Timers & Intervals: Always track setInterval IDs in variables and clear them via clearInterval on reset or stop to prevent frozen or duplicate timers."
         )
 
         # ── Step 0: Emit immediate "querying engine" step so frontend shows activity ──
@@ -1011,28 +1144,46 @@ class GlassAgent:
             context_parts.append(f"ATTACHED FILE `{file_name}` TO AUDIT/UPDATE:\n```{file_name}\n{file_content}\n```")
         elif not file_content:
             prompt_lower = prompt.lower()
-            is_new_request = any(k in prompt_lower for k in ["make", "create", "build", "generate", "new", "index.html", "write a", "scientific calculator"])
+            reset_intent_keywords = [
+                "make", "create", "build", "generate", "new", "index.html", "write a", "scientific calculator",
+                "where is", "where's", "bring back", "redo", "restart", "start over", "i asked for", "rebuild"
+            ]
+            is_new_request = any(k in prompt_lower for k in reset_intent_keywords)
 
             # Only inject existing workspace files if the user is explicitly refining/editing existing code
             if not is_new_request:
                 existing_files = self.workspace.list_files()
                 if existing_files:
+                    # Detect current application identity to lock context
+                    app_identity = ""
+                    for ef in existing_files:
+                        if ef.endswith(".html"):
+                            try:
+                                h_content = self.workspace.read_file(ef)
+                                title_match = re.search(r'<title>(.*?)</title>', h_content, re.IGNORECASE)
+                                if title_match:
+                                    app_identity = title_match.group(1).strip()
+                                    break
+                            except Exception:
+                                pass
+
                     loaded_context = []
                     for ef in existing_files[:4]:
                         try:
                             content = self.workspace.read_file(ef)
-                            # Cap each file at 4000 chars to prevent context overflow on repeated edits
-                            if len(content) > 4000:
-                                content = content[:4000] + f"\n... [truncated for context efficiency — {len(content) - 4000} chars remaining]"
+                            # Full file visibility — no partial truncation so AI never loses context
                             loaded_context.append(f"CURRENT WORKSPACE FILE `{ef}`:\n```{ef}\n{content}\n```")
                         except Exception:
                             pass
                     if loaded_context:
+                        identity_line = f"║  TARGET APPLICATION: {app_identity[:40].upper():<40} ║\n" if app_identity else ""
                         edit_mode_header = (
                             "╔══════════════════════════════════════════════════════╗\n"
                             "║  EDIT MODE — DO NOT REWRITE FROM SCRATCH             ║\n"
+                            + identity_line +
                             "║  Modify ONLY what the PRIMARY OBJECTIVE requests.    ║\n"
                             "║  Keep all existing logic, styles, and structure.     ║\n"
+                            "║  DO NOT change application genre or core functionality.║\n"
                             "╚══════════════════════════════════════════════════════╝"
                         )
                         context_parts.append(edit_mode_header + "\n\nEXISTING WORKSPACE FILES TO MODIFY:\n" + "\n\n".join(loaded_context))
